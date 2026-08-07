@@ -1,0 +1,3 @@
+APP_NAME = "鼠标手势动作小工具"
+APP_VERSION = "1.0"
+VERSION_TAG = f"V{APP_VERSION}"

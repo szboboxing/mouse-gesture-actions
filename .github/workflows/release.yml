@@ -1,0 +1,67 @@
+name: Publish Release
+
+on:
+  push:
+    tags:
+      - "V*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements-dev.txt
+
+      - name: Verify tag matches source version
+        shell: powershell
+        run: |
+          $ExpectedTag = (python -c "from version import VERSION_TAG; print(VERSION_TAG)").Trim()
+          if ($env:GITHUB_REF_NAME -ne $ExpectedTag) {
+              throw "Tag $env:GITHUB_REF_NAME does not match source version $ExpectedTag"
+          }
+
+      - name: Run tests and build EXE
+        shell: powershell
+        run: .\build.ps1
+
+      - name: Generate SHA-256 file
+        shell: powershell
+        run: |
+          $Exe = Get-ChildItem dist -Filter "*.exe" | Select-Object -First 1
+          $Hash = Get-FileHash $Exe.FullName -Algorithm SHA256
+          "$($Hash.Hash)  $($Exe.Name)" | Set-Content dist\SHA256.txt -Encoding UTF8
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: 鼠标手势动作小工具 ${{ github.ref_name }}
+          body: |
+            Windows 单文件版本，无需安装 Python。
+
+            默认手势：
+            - 逆时针圆圈：复制
+            - 顺时针圆圈：粘贴
+            - 对勾：截图
+            - 同方向右上或左下快划两次：当前目录新建文件夹
+
+            请同时下载 `SHA256.txt` 校验文件完整性。
+          files: |
+            dist/*.exe
+            dist/SHA256.txt
+          fail_on_unmatched_files: true
+          generate_release_notes: true
