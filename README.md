@@ -75,6 +75,7 @@ Alt+F4
 - 唯一版本来源是 `version.py` 中的 `APP_VERSION`。
 - Git 标签与 GitHub Release 使用相同的 `Vx.y` 名称。
 - 每次构建会自动清理 `dist`，本地只保留版本号最高的两个 EXE。
+- 本地 EXE 使用中文产品名，GitHub Release 使用稳定下载名 `mouse-gesture-actions-Vx.y.exe`。
 - GitHub Release 永久保留已发布版本，不受本地清理规则影响。
 
 发布新版本时：

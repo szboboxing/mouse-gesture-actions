@@ -39,12 +39,23 @@ jobs:
         shell: powershell
         run: .\build.ps1
 
-      - name: Generate SHA-256 file
+      - name: Prepare release assets
         shell: powershell
         run: |
-          $Exe = Get-ChildItem dist -Filter "*.exe" | Select-Object -First 1
-          $Hash = Get-FileHash $Exe.FullName -Algorithm SHA256
-          "$($Hash.Hash)  $($Exe.Name)" | Set-Content dist\SHA256.txt -Encoding UTF8
+          $BuiltExe = Get-ChildItem dist -Filter "*.exe" |
+              Where-Object { $_.Name -notlike "mouse-gesture-actions-*" } |
+              Select-Object -First 1
+          if (-not $BuiltExe) {
+              throw "Built EXE was not found"
+          }
+
+          $ReleaseName = "mouse-gesture-actions-$env:GITHUB_REF_NAME.exe"
+          $ReleasePath = Join-Path "dist" $ReleaseName
+          Copy-Item $BuiltExe.FullName $ReleasePath
+
+          $Hash = Get-FileHash $ReleasePath -Algorithm SHA256
+          "$($Hash.Hash)  $ReleaseName" |
+              Set-Content dist\SHA256.txt -Encoding ASCII
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
@@ -61,7 +72,7 @@ jobs:
 
             请同时下载 `SHA256.txt` 校验文件完整性。
           files: |
-            dist/*.exe
+            dist/mouse-gesture-actions-*.exe
             dist/SHA256.txt
           fail_on_unmatched_files: true
           generate_release_notes: true
