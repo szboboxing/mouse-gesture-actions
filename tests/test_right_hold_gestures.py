@@ -10,14 +10,23 @@ from mouse_hook import (
     HC_ACTION,
     MSLLHOOKSTRUCT,
     WM_LBUTTONDOWN,
+    WM_LBUTTONUP,
+    WM_MBUTTONDOWN,
+    WM_MBUTTONUP,
+    WM_MOUSEWHEEL,
+    WM_RBUTTONDOWN,
+    WM_RBUTTONUP,
     WM_XBUTTONDOWN,
     WM_XBUTTONUP,
     XBUTTON1,
     XBUTTON2,
     GlobalRightButtonActionHook,
     HeldMouseAction,
+    MouseControl,
     MouseMetricsTracker,
+    MouseTestEvent,
     RightHoldGestureState,
+    _decode_mouse_test_event,
     _high_word,
     _signed_high_word,
 )
@@ -114,6 +123,8 @@ class SideButtonHookTests(unittest.TestCase):
             GlobalRightButtonActionHook
         )
         hook._enabled = True
+        hook._test_mode = False
+        hook._on_test_event = Mock()
         hook._lock = threading.Lock()
         hook._state = RightHoldGestureState()
         hook._metrics = MouseMetricsTracker()
@@ -128,10 +139,10 @@ class SideButtonHookTests(unittest.TestCase):
     def _mouse_event(
         hook: GlobalRightButtonActionHook,
         message: int,
-        xbutton: int = 0,
+        high_word: int = 0,
     ) -> int:
         data = MSLLHOOKSTRUCT()
-        data.mouseData = xbutton << 16
+        data.mouseData = high_word << 16
         return hook._mouse_proc(
             HC_ACTION,
             message,
@@ -186,6 +197,60 @@ class SideButtonHookTests(unittest.TestCase):
         self.assertFalse(hook._state.active)
         self.assertTrue(hook._action_queue.empty())
 
+    def test_test_mode_passes_every_control_through(self) -> None:
+        hook = self._hook(right_button_down=True)
+        hook.set_enabled(False)
+        hook.set_test_mode(True)
+        events = (
+            (WM_LBUTTONDOWN, 0),
+            (WM_LBUTTONUP, 0),
+            (WM_RBUTTONDOWN, 0),
+            (WM_RBUTTONUP, 0),
+            (WM_MBUTTONDOWN, 0),
+            (WM_MBUTTONUP, 0),
+            (WM_MOUSEWHEEL, 120),
+            (WM_MOUSEWHEEL, 0x10000 - 120),
+            (WM_XBUTTONDOWN, XBUTTON1),
+            (WM_XBUTTONUP, XBUTTON1),
+            (WM_XBUTTONDOWN, XBUTTON2),
+            (WM_XBUTTONUP, XBUTTON2),
+        )
+
+        results = [
+            self._mouse_event(hook, message, high_word)
+            for message, high_word in events
+        ]
+
+        self.assertEqual(results, [73] * len(events))
+        self.assertEqual(hook._call_next.call_count, len(events))
+        self.assertEqual(hook._on_test_event.call_count, len(events))
+        self.assertTrue(hook._action_queue.empty())
+        self.assertFalse(hook._state.active)
+
+    def test_leaving_test_mode_restores_right_hold_actions(self) -> None:
+        hook = self._hook(right_button_down=True)
+        hook.set_test_mode(True)
+        test_result = self._mouse_event(
+            hook,
+            WM_XBUTTONDOWN,
+            XBUTTON1,
+        )
+
+        hook.set_test_mode(False)
+        hook._state.press_right()
+        action_result = self._mouse_event(
+            hook,
+            WM_XBUTTONDOWN,
+            XBUTTON1,
+        )
+
+        self.assertEqual(test_result, 73)
+        self.assertEqual(action_result, 1)
+        self.assertEqual(
+            hook._action_queue.get_nowait(),
+            HeldMouseAction.SCREENSHOT,
+        )
+
 
 class MouseDataParsingTests(unittest.TestCase):
     def test_mouse_wheel_delta_is_signed(self) -> None:
@@ -195,6 +260,53 @@ class MouseDataParsingTests(unittest.TestCase):
     def test_xbutton_is_read_from_high_word(self) -> None:
         self.assertEqual(_high_word(1 << 16), 1)
         self.assertEqual(_high_word(2 << 16), 2)
+
+    def test_mouse_test_button_events_are_decoded(self) -> None:
+        cases = (
+            (WM_LBUTTONDOWN, MouseControl.LEFT, True),
+            (WM_LBUTTONUP, MouseControl.LEFT, False),
+            (WM_RBUTTONDOWN, MouseControl.RIGHT, True),
+            (WM_RBUTTONUP, MouseControl.RIGHT, False),
+            (WM_MBUTTONDOWN, MouseControl.MIDDLE, True),
+            (WM_MBUTTONUP, MouseControl.MIDDLE, False),
+            (WM_XBUTTONDOWN, MouseControl.XBUTTON1, True),
+            (WM_XBUTTONUP, MouseControl.XBUTTON1, False),
+        )
+        for message, control, pressed in cases:
+            with self.subTest(message=message, control=control):
+                high_word = XBUTTON1 if "xbutton" in control.value else 0
+                event = _decode_mouse_test_event(
+                    message,
+                    high_word << 16,
+                )
+                self.assertEqual(event, MouseTestEvent(control, pressed))
+
+        for message, pressed in (
+            (WM_XBUTTONDOWN, True),
+            (WM_XBUTTONUP, False),
+        ):
+            with self.subTest(message=message, control=MouseControl.XBUTTON2):
+                event = _decode_mouse_test_event(
+                    message,
+                    XBUTTON2 << 16,
+                )
+                self.assertEqual(
+                    event,
+                    MouseTestEvent(MouseControl.XBUTTON2, pressed),
+                )
+
+    def test_mouse_test_wheel_directions_are_decoded(self) -> None:
+        self.assertEqual(
+            _decode_mouse_test_event(WM_MOUSEWHEEL, 120 << 16),
+            MouseTestEvent(MouseControl.WHEEL_UP, True),
+        )
+        self.assertEqual(
+            _decode_mouse_test_event(
+                WM_MOUSEWHEEL,
+                (0x10000 - 120) << 16,
+            ),
+            MouseTestEvent(MouseControl.WHEEL_DOWN, True),
+        )
 
 
 if __name__ == "__main__":

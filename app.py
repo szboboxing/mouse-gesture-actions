@@ -16,6 +16,8 @@ from actions import ActionResult, SystemActions
 from mouse_hook import (
     GlobalRightButtonActionHook,
     HeldMouseAction,
+    MouseControl,
+    MouseTestEvent,
 )
 from settings import AppSettings, load_settings
 from version import APP_NAME, VERSION_TAG
@@ -67,6 +69,16 @@ USAGE_LABELS = (
     ("contrast", "对比度调节"),
     ("custom", "自定义功能"),
 )
+
+MOUSE_TEST_LABELS = {
+    MouseControl.LEFT: "左键",
+    MouseControl.RIGHT: "右键",
+    MouseControl.MIDDLE: "中键 / 滚轮按下",
+    MouseControl.WHEEL_UP: "滚轮向上",
+    MouseControl.WHEEL_DOWN: "滚轮向下",
+    MouseControl.XBUTTON1: "上一页 / XButton1",
+    MouseControl.XBUTTON2: "下一页 / XButton2",
+}
 
 
 class GestureCard(tk.Frame):
@@ -186,11 +198,25 @@ class MouseGestureApp:
         self.settings = load_settings()
         self.actions = SystemActions()
         self.ui_events: queue.Queue[tuple[str, object]] = queue.Queue()
-        self.hook = GlobalRightButtonActionHook(self._on_held_action)
+        self.hook = GlobalRightButtonActionHook(
+            self._on_held_action,
+            self._on_mouse_test_event,
+        )
         self.usage_counts: Counter[str] = Counter()
+        self.mouse_test_counts: Counter[MouseControl] = Counter()
         self.listening = False
+        self.active_page = "dashboard"
         self.toast: tk.Toplevel | None = None
         self.toast_after_id: str | None = None
+        self.pages: dict[str, tk.Frame] = {}
+        self.nav_buttons: dict[str, tk.Button] = {}
+        self.mouse_test_items: dict[
+            MouseControl,
+            list[tuple[int, str, str]],
+        ] = {}
+        self.mouse_test_status_labels: dict[MouseControl, tk.Label] = {}
+        self.mouse_test_after_ids: dict[MouseControl, str] = {}
+        self.mouse_test_canvas: tk.Canvas | None = None
 
         self.launch_var = tk.BooleanVar(value=self.settings.launch_listening)
         self.minimize_var = tk.BooleanVar(
@@ -202,6 +228,10 @@ class MouseGestureApp:
         self.distance_var = tk.StringVar(value="0 px")
         self.usage_vars = {
             key: tk.StringVar(value="0") for key, _label in USAGE_LABELS
+        }
+        self.mouse_test_status_var = tk.StringVar(value="等待操作")
+        self.mouse_test_count_vars = {
+            control: tk.StringVar(value="0") for control in MouseControl
         }
         self.custom_name_vars = (
             tk.StringVar(value=self.settings.custom_button_1_name),
@@ -363,6 +393,26 @@ class MouseGestureApp:
         )
         self.toggle_button.pack(fill="x", padx=17, pady=(0, 22))
 
+        tk.Label(
+            sidebar,
+            text="功能模块",
+            bg=COLORS["nav"],
+            fg=COLORS["nav_muted"],
+            font=("Microsoft YaHei UI", 8, "bold"),
+        ).pack(anchor="w", padx=22, pady=(0, 8))
+        nav_box = tk.Frame(sidebar, bg=COLORS["nav"])
+        nav_box.pack(fill="x", padx=17)
+        self.nav_buttons["dashboard"] = self._nav_button(
+            nav_box,
+            "功能首页",
+            lambda: self._show_page("dashboard"),
+        )
+        self.nav_buttons["mouse_test"] = self._nav_button(
+            nav_box,
+            "鼠标按键测试",
+            lambda: self._show_page("mouse_test"),
+        )
+
         help_box = tk.Frame(sidebar, bg=COLORS["nav"])
         help_box.pack(side="bottom", fill="x", padx=22, pady=25)
         tk.Label(
@@ -385,9 +435,70 @@ class MouseGestureApp:
                 font=("Microsoft YaHei UI", 9),
             ).pack(anchor="w", pady=3)
 
-        page = tk.Frame(self.root, bg=COLORS["page"])
-        page.pack(side="left", fill="both", expand=True)
-        self._build_page(page)
+        page_container = tk.Frame(self.root, bg=COLORS["page"])
+        page_container.pack(side="left", fill="both", expand=True)
+        page_container.rowconfigure(0, weight=1)
+        page_container.columnconfigure(0, weight=1)
+
+        dashboard_page = tk.Frame(page_container, bg=COLORS["page"])
+        mouse_test_page = tk.Frame(page_container, bg=COLORS["page"])
+        self.pages = {
+            "dashboard": dashboard_page,
+            "mouse_test": mouse_test_page,
+        }
+        for page in self.pages.values():
+            page.grid(row=0, column=0, sticky="nsew")
+
+        self._build_page(dashboard_page)
+        self._build_mouse_test_page(mouse_test_page)
+        self._show_page("dashboard")
+
+    @staticmethod
+    def _nav_button(
+        parent: tk.Frame,
+        text: str,
+        command: Callable[[], None],
+    ) -> tk.Button:
+        button = tk.Button(
+            parent,
+            text=text,
+            command=command,
+            bg=COLORS["nav"],
+            fg=COLORS["nav_text"],
+            activebackground=COLORS["nav_soft"],
+            activeforeground="#FFFFFF",
+            relief="flat",
+            bd=0,
+            cursor="hand2",
+            anchor="w",
+            padx=14,
+            pady=10,
+            font=("Microsoft YaHei UI", 9, "bold"),
+        )
+        button.pack(fill="x", pady=2)
+        return button
+
+    def _show_page(self, page_name: str) -> None:
+        page = self.pages.get(page_name)
+        if page is None:
+            return
+
+        self.active_page = page_name
+        page.tkraise()
+        test_mode = page_name == "mouse_test"
+        self.hook.set_test_mode(test_mode)
+        if not test_mode:
+            self._clear_mouse_test_pressed()
+
+        for name, button in self.nav_buttons.items():
+            selected = name == page_name
+            button.configure(
+                bg=COLORS["blue"] if selected else COLORS["nav"],
+                activebackground=(
+                    "#405ED9" if selected else COLORS["nav_soft"]
+                ),
+            )
+        self._refresh_listening_state()
 
     def _build_page(self, page: tk.Frame) -> None:
         header = tk.Frame(page, bg=COLORS["page"])
@@ -670,6 +781,357 @@ class MouseGestureApp:
         settings_panel.columnconfigure(3, weight=1)
         self._build_encouragement(page)
 
+    def _build_mouse_test_page(self, page: tk.Frame) -> None:
+        header = tk.Frame(page, bg=COLORS["page"])
+        header.pack(fill="x", padx=28, pady=(24, 16))
+        title_box = tk.Frame(header, bg=COLORS["page"])
+        title_box.pack(side="left")
+        tk.Label(
+            title_box,
+            text="鼠标按键测试",
+            bg=COLORS["page"],
+            fg=COLORS["text"],
+            font=("Microsoft YaHei UI", 22, "bold"),
+        ).pack(anchor="w")
+        tk.Label(
+            title_box,
+            text="操作鼠标并观察图示高亮，快速检查每个物理按键",
+            bg=COLORS["page"],
+            fg=COLORS["muted"],
+            font=("Microsoft YaHei UI", 10),
+        ).pack(anchor="w", pady=(5, 0))
+        tk.Label(
+            header,
+            text="实时检测 · 按键完整透传",
+            bg=COLORS["green_soft"],
+            fg=COLORS["green"],
+            padx=14,
+            pady=8,
+            font=("Microsoft YaHei UI", 9, "bold"),
+        ).pack(side="right", anchor="n")
+
+        content = tk.Frame(page, bg=COLORS["page"])
+        content.pack(fill="both", expand=True, padx=28, pady=(0, 18))
+        content.columnconfigure(0, weight=3, minsize=540)
+        content.columnconfigure(1, weight=2, minsize=330)
+        content.rowconfigure(0, weight=1)
+
+        visual_panel = tk.Frame(
+            content,
+            bg=COLORS["card"],
+            highlightbackground=COLORS["line"],
+            highlightthickness=1,
+            padx=18,
+            pady=16,
+        )
+        visual_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 14))
+        tk.Label(
+            visual_panel,
+            text="鼠标按键图示",
+            bg=COLORS["card"],
+            fg=COLORS["text"],
+            font=("Microsoft YaHei UI", 12, "bold"),
+        ).pack(anchor="w")
+        tk.Label(
+            visual_panel,
+            text="按下时对应区域变为绿色；滚轮方向会短暂闪烁",
+            bg=COLORS["card"],
+            fg=COLORS["muted"],
+            font=("Microsoft YaHei UI", 9),
+        ).pack(anchor="w", pady=(4, 8))
+
+        self.mouse_test_canvas = tk.Canvas(
+            visual_panel,
+            width=620,
+            height=520,
+            bg="#F8F9FC",
+            highlightthickness=0,
+        )
+        self.mouse_test_canvas.pack(fill="both", expand=True)
+        self._draw_mouse_test_mouse(self.mouse_test_canvas)
+
+        details = tk.Frame(
+            content,
+            bg=COLORS["card"],
+            highlightbackground=COLORS["line"],
+            highlightthickness=1,
+            padx=18,
+            pady=16,
+        )
+        details.grid(row=0, column=1, sticky="nsew")
+        details.columnconfigure(0, weight=1)
+        tk.Label(
+            details,
+            text="检测结果",
+            bg=COLORS["card"],
+            fg=COLORS["text"],
+            font=("Microsoft YaHei UI", 12, "bold"),
+        ).grid(row=0, column=0, sticky="w")
+        status_card = tk.Frame(
+            details,
+            bg=COLORS["blue_soft"],
+            padx=13,
+            pady=12,
+        )
+        status_card.grid(row=1, column=0, sticky="ew", pady=(10, 14))
+        tk.Label(
+            status_card,
+            text="最后检测",
+            bg=COLORS["blue_soft"],
+            fg=COLORS["muted"],
+            font=("Microsoft YaHei UI", 8),
+        ).pack(anchor="w")
+        tk.Label(
+            status_card,
+            textvariable=self.mouse_test_status_var,
+            bg=COLORS["blue_soft"],
+            fg=COLORS["blue"],
+            font=("Microsoft YaHei UI", 12, "bold"),
+            wraplength=270,
+            justify="left",
+        ).pack(anchor="w", pady=(4, 0))
+
+        list_box = tk.Frame(details, bg=COLORS["card"])
+        list_box.grid(row=2, column=0, sticky="nsew")
+        details.rowconfigure(2, weight=1)
+        for control in MouseControl:
+            item = tk.Frame(
+                list_box,
+                bg=COLORS["page"],
+                padx=10,
+                pady=8,
+            )
+            item.pack(fill="x", pady=3)
+            indicator = tk.Label(
+                item,
+                text="●",
+                bg=COLORS["page"],
+                fg=COLORS["line"],
+                font=("Segoe UI", 9, "bold"),
+            )
+            indicator.pack(side="left")
+            self.mouse_test_status_labels[control] = indicator
+            tk.Label(
+                item,
+                text=MOUSE_TEST_LABELS[control],
+                bg=COLORS["page"],
+                fg=COLORS["text"],
+                font=("Microsoft YaHei UI", 9),
+            ).pack(side="left", padx=(8, 0))
+            tk.Label(
+                item,
+                textvariable=self.mouse_test_count_vars[control],
+                bg=COLORS["page"],
+                fg=COLORS["blue"],
+                font=("Segoe UI", 10, "bold"),
+            ).pack(side="right")
+
+        tk.Button(
+            details,
+            text="清空测试记录",
+            command=self._reset_mouse_test,
+            bg=COLORS["blue"],
+            fg="#FFFFFF",
+            activebackground="#405ED9",
+            activeforeground="#FFFFFF",
+            relief="flat",
+            bd=0,
+            cursor="hand2",
+            padx=14,
+            pady=9,
+            font=("Microsoft YaHei UI", 9, "bold"),
+        ).grid(row=3, column=0, sticky="ew", pady=(14, 0))
+
+    def _draw_mouse_test_mouse(self, canvas: tk.Canvas) -> None:
+        self.mouse_test_items.clear()
+        canvas.create_oval(
+            155,
+            24,
+            465,
+            505,
+            fill="#E9EDF5",
+            outline="#B9C2D1",
+            width=3,
+        )
+        canvas.create_line(
+            310,
+            42,
+            310,
+            220,
+            fill="#B9C2D1",
+            width=2,
+        )
+
+        left = canvas.create_polygon(
+            181,
+            91,
+            214,
+            57,
+            302,
+            39,
+            302,
+            216,
+            173,
+            205,
+            fill="#FFFFFF",
+            outline="#CCD3DF",
+            width=2,
+        )
+        left_text = canvas.create_text(
+            239,
+            137,
+            text="左键",
+            fill=COLORS["text"],
+            font=("Microsoft YaHei UI", 12, "bold"),
+        )
+        self._register_mouse_test_visual(
+            MouseControl.LEFT,
+            left,
+            "#FFFFFF",
+            COLORS["green"],
+        )
+        self._register_mouse_test_visual(
+            MouseControl.LEFT,
+            left_text,
+            COLORS["text"],
+            "#FFFFFF",
+        )
+
+        right = canvas.create_polygon(
+            318,
+            39,
+            406,
+            57,
+            439,
+            91,
+            447,
+            205,
+            318,
+            216,
+            fill="#FFFFFF",
+            outline="#CCD3DF",
+            width=2,
+        )
+        right_text = canvas.create_text(
+            381,
+            137,
+            text="右键",
+            fill=COLORS["text"],
+            font=("Microsoft YaHei UI", 12, "bold"),
+        )
+        self._register_mouse_test_visual(
+            MouseControl.RIGHT,
+            right,
+            "#FFFFFF",
+            COLORS["green"],
+        )
+        self._register_mouse_test_visual(
+            MouseControl.RIGHT,
+            right_text,
+            COLORS["text"],
+            "#FFFFFF",
+        )
+
+        wheel = canvas.create_rectangle(
+            282,
+            72,
+            338,
+            194,
+            fill="#CBD3E1",
+            outline="#9CA8BA",
+            width=2,
+        )
+        self._register_mouse_test_visual(
+            MouseControl.MIDDLE,
+            wheel,
+            "#CBD3E1",
+            COLORS["green"],
+        )
+        wheel_label = canvas.create_text(
+            310,
+            133,
+            text="按下",
+            angle=90,
+            fill=COLORS["muted"],
+            font=("Microsoft YaHei UI", 8, "bold"),
+        )
+        self._register_mouse_test_visual(
+            MouseControl.MIDDLE,
+            wheel_label,
+            COLORS["muted"],
+            "#FFFFFF",
+        )
+
+        for control, y, text in (
+            (MouseControl.WHEEL_UP, 88, "▲"),
+            (MouseControl.WHEEL_DOWN, 178, "▼"),
+        ):
+            arrow = canvas.create_text(
+                310,
+                y,
+                text=text,
+                fill=COLORS["muted"],
+                font=("Segoe UI", 13, "bold"),
+            )
+            self._register_mouse_test_visual(
+                control,
+                arrow,
+                COLORS["muted"],
+                COLORS["orange"],
+            )
+
+        for control, top, label in (
+            (MouseControl.XBUTTON1, 246, "X1\n上一页"),
+            (MouseControl.XBUTTON2, 320, "X2\n下一页"),
+        ):
+            button = canvas.create_rectangle(
+                127,
+                top,
+                183,
+                top + 55,
+                fill=COLORS["blue_soft"],
+                outline=COLORS["blue"],
+                width=2,
+            )
+            text = canvas.create_text(
+                155,
+                top + 27,
+                text=label,
+                fill=COLORS["blue"],
+                font=("Microsoft YaHei UI", 8, "bold"),
+            )
+            self._register_mouse_test_visual(
+                control,
+                button,
+                COLORS["blue_soft"],
+                COLORS["green"],
+            )
+            self._register_mouse_test_visual(
+                control,
+                text,
+                COLORS["blue"],
+                "#FFFFFF",
+            )
+
+        canvas.create_text(
+            310,
+            455,
+            text="移动鼠标不会影响测试计数",
+            fill=COLORS["muted"],
+            font=("Microsoft YaHei UI", 9),
+        )
+
+    def _register_mouse_test_visual(
+        self,
+        control: MouseControl,
+        item_id: int,
+        idle_color: str,
+        active_color: str,
+    ) -> None:
+        self.mouse_test_items.setdefault(control, []).append(
+            (item_id, idle_color, active_color)
+        )
+
     def _build_quick_tools(self, page: tk.Frame) -> None:
         panel = tk.Frame(
             page,
@@ -916,6 +1378,19 @@ class MouseGestureApp:
         self._append_log(state, "success" if self.listening else "warning")
 
     def _refresh_listening_state(self) -> None:
+        if self.active_page == "mouse_test":
+            self.status_var.set("按键测试中")
+            self._set_status_dot(COLORS["blue"])
+            self.toggle_button.configure(
+                text="测试期间暂停组合",
+                bg=COLORS["nav_soft"],
+                activebackground=COLORS["nav_soft"],
+                state="disabled",
+                disabledforeground="#FFFFFF",
+            )
+            return
+
+        self.toggle_button.configure(state="normal")
         if self.listening:
             self.status_var.set("正在监听")
             self._set_status_dot(COLORS["green"])
@@ -1090,6 +1565,76 @@ class MouseGestureApp:
             ("held_action", (action, action_result, event_type))
         )
 
+    def _on_mouse_test_event(self, event: MouseTestEvent) -> None:
+        self.ui_events.put(("mouse_test", event))
+
+    def _display_mouse_test_event(self, event: MouseTestEvent) -> None:
+        if self.active_page != "mouse_test":
+            return
+
+        control = event.control
+        if event.pressed:
+            self.mouse_test_counts[control] += 1
+            self.mouse_test_count_vars[control].set(
+                f"{self.mouse_test_counts[control]:,}"
+            )
+            self.mouse_test_status_var.set(
+                f"检测到：{MOUSE_TEST_LABELS[control]}"
+            )
+        self._set_mouse_test_visual(control, event.pressed)
+
+        if control in (MouseControl.WHEEL_UP, MouseControl.WHEEL_DOWN):
+            previous = self.mouse_test_after_ids.pop(control, None)
+            if previous is not None:
+                self.root.after_cancel(previous)
+            self.mouse_test_after_ids[control] = self.root.after(
+                220,
+                lambda target=control: self._release_mouse_test_control(
+                    target
+                ),
+            )
+
+    def _release_mouse_test_control(self, control: MouseControl) -> None:
+        self.mouse_test_after_ids.pop(control, None)
+        self._set_mouse_test_visual(control, False)
+
+    def _set_mouse_test_visual(
+        self,
+        control: MouseControl,
+        pressed: bool,
+    ) -> None:
+        if self.mouse_test_canvas is not None:
+            for item_id, idle_color, active_color in self.mouse_test_items.get(
+                control,
+                (),
+            ):
+                self.mouse_test_canvas.itemconfigure(
+                    item_id,
+                    fill=active_color if pressed else idle_color,
+                )
+        indicator = self.mouse_test_status_labels.get(control)
+        if indicator is not None:
+            indicator.configure(
+                fg=COLORS["green"] if pressed else COLORS["line"]
+            )
+
+    def _clear_mouse_test_pressed(self) -> None:
+        for after_id in self.mouse_test_after_ids.values():
+            try:
+                self.root.after_cancel(after_id)
+            except tk.TclError:
+                pass
+        self.mouse_test_after_ids.clear()
+        for control in MouseControl:
+            self._set_mouse_test_visual(control, False)
+
+    def _reset_mouse_test(self) -> None:
+        self.mouse_test_counts.clear()
+        self.mouse_test_status_var.set("等待操作")
+        for variable in self.mouse_test_count_vars.values():
+            variable.set("0")
+        self._clear_mouse_test_pressed()
+
     def _execute_held_action(
         self,
         action: HeldMouseAction,
@@ -1111,6 +1656,8 @@ class MouseGestureApp:
                         action_result,
                         event_type,
                     )
+                elif event_name == "mouse_test":
+                    self._display_mouse_test_event(payload)
         except queue.Empty:
             pass
         self.root.after(60, self._poll_ui_events)
