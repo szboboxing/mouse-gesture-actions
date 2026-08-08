@@ -51,6 +51,11 @@ Windows 全局鼠标手势工具。按住鼠标右键绘制轨迹，松开后将
 %APPDATA%\MouseGestureActions\settings.json
 ```
 
+## 版本说明
+
+- [V1.1 版本说明](docs/releases/V1.1.md)：包含完整功能说明、操作方法、兼容限制和 SHA-256 校验信息。
+- [GitHub Releases](https://github.com/szboboxing/mouse-gesture-actions/releases)：下载全部已发布版本。
+
 ## 快捷键格式
 
 使用加号连接按键，例如：

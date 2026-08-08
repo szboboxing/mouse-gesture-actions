@@ -61,24 +61,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           name: 鼠标手势动作小工具 ${{ github.ref_name }}
-          body: |
-            Windows 单文件版本，无需安装 Python。
-
-            V1.1 新增：
-            - 优化高 DPI 界面尺寸与文字换行，完整展示标题和功能说明
-            - 新增鼠标左右键次数、移动距离和功能使用次数统计
-            - 新增计算器、浏览器、媒体播放器快捷启动
-            - 新增屏幕亮度与对比度调节
-            - 新增两个可编辑的自定义功能按钮
-            - 新增随机鼓励语
-
-            默认手势：
-            - 逆时针圆圈：复制
-            - 顺时针圆圈：粘贴
-            - 对勾：截图
-            - 同方向右上或左下快划两次：当前目录新建文件夹
-
-            请同时下载 `SHA256.txt` 校验文件完整性。
+          body_path: docs/releases/${{ github.ref_name }}.md
           files: |
             dist/mouse-gesture-actions-*.exe
             dist/SHA256.txt
