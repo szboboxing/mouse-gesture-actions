@@ -2563,11 +2563,11 @@ class MouseGestureApp:
 
         dialog = tk.Toplevel(self.root)
         self._close_dialog = dialog
+        dialog.withdraw()
         dialog.title("关闭软件")
         dialog.configure(bg=COLORS["card"])
         dialog.resizable(False, False)
         dialog.transient(self.root)
-        dialog.grab_set()
 
         content = tk.Frame(dialog, bg=COLORS["card"], padx=24, pady=20)
         content.pack(fill="both", expand=True)
@@ -2671,6 +2671,10 @@ class MouseGestureApp:
             (self.root.winfo_height() - height) // 2,
         )
         dialog.geometry(f"{width}x{height}+{x}+{y}")
+        dialog.deiconify()
+        dialog.lift()
+        dialog.wait_visibility()
+        dialog.grab_set()
         dialog.after(
             80,
             lambda: self._focus_close_cancel_button(
