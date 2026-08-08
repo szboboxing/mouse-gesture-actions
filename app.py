@@ -43,6 +43,13 @@ COLORS = {
     "red_soft": "#FDECEF",
 }
 
+CUSTOM_TOOL_ICONS = ("◇", "◆")
+
+
+def _quick_tool_label(icon: str, label: str) -> str:
+    return f"{icon}\n{label}"
+
+
 ENCOURAGEMENTS = (
     "今天也在认真生活，你已经做得很好了。",
     "别急，稳稳地走，每一步都算数。",
@@ -265,6 +272,15 @@ class MouseGestureApp:
         self.custom_name_vars = (
             tk.StringVar(value=self.settings.custom_button_1_name),
             tk.StringVar(value=self.settings.custom_button_2_name),
+        )
+        self.custom_quick_label_vars = tuple(
+            tk.StringVar(
+                value=_quick_tool_label(
+                    CUSTOM_TOOL_ICONS[index],
+                    name_var.get(),
+                )
+            )
+            for index, name_var in enumerate(self.custom_name_vars)
         )
         self.encouragement_var = tk.StringVar()
 
@@ -1264,6 +1280,8 @@ class MouseGestureApp:
                 "calculator", self.actions.open_calculator
             ),
             COLORS["blue"],
+            icon="▦",
+            hover_color=COLORS["blue_soft"],
         )
         self._quick_button(
             buttons,
@@ -1273,6 +1291,8 @@ class MouseGestureApp:
                 "browser", self.actions.open_browser
             ),
             COLORS["green"],
+            icon="◎",
+            hover_color=COLORS["green_soft"],
         )
         self._quick_button(
             buttons,
@@ -1282,6 +1302,8 @@ class MouseGestureApp:
                 "media", self.actions.open_media_player
             ),
             COLORS["orange"],
+            icon="▶",
+            hover_color=COLORS["orange_soft"],
         )
         self._adjustment_group(
             buttons,
@@ -1289,6 +1311,9 @@ class MouseGestureApp:
             "屏幕亮度",
             lambda: self._run_display_adjustment("brightness", -1),
             lambda: self._run_display_adjustment("brightness", 1),
+            "☀",
+            COLORS["orange"],
+            COLORS["orange_soft"],
         )
         self._adjustment_group(
             buttons,
@@ -1296,6 +1321,9 @@ class MouseGestureApp:
             "屏幕对比度",
             lambda: self._run_display_adjustment("contrast", -1),
             lambda: self._run_display_adjustment("contrast", 1),
+            "◐",
+            COLORS["blue"],
+            COLORS["blue_soft"],
         )
         self._quick_button(
             buttons,
@@ -1303,6 +1331,8 @@ class MouseGestureApp:
             "统计清零",
             self._reset_statistics,
             COLORS["red"],
+            icon="↻",
+            hover_color=COLORS["red_soft"],
         )
         for offset in range(2):
             button = self._quick_button(
@@ -1311,7 +1341,8 @@ class MouseGestureApp:
                 "",
                 lambda index=offset: self._run_custom_action(index),
                 COLORS["blue"],
-                textvariable=self.custom_name_vars[offset],
+                textvariable=self.custom_quick_label_vars[offset],
+                hover_color=COLORS["blue_soft"],
             )
             button.bind(
                 "<Button-3>",
@@ -1326,10 +1357,13 @@ class MouseGestureApp:
         command: Callable[[], None],
         accent: str,
         textvariable: tk.StringVar | None = None,
+        *,
+        icon: str = "",
+        hover_color: str = COLORS["blue_soft"],
     ) -> tk.Button:
         button = tk.Button(
             parent,
-            text=text,
+            text=_quick_tool_label(icon, text) if icon else text,
             textvariable=textvariable,
             command=command,
             bg=COLORS["page"],
@@ -1341,10 +1375,18 @@ class MouseGestureApp:
             relief="flat",
             bd=0,
             cursor="hand2",
-            font=("Microsoft YaHei UI", 8, "bold"),
+            font=("Microsoft YaHei UI", 9, "bold"),
             wraplength=95,
+            justify="center",
             padx=5,
-            pady=9,
+            pady=7,
+        )
+        MouseGestureApp._bind_button_hover(
+            button,
+            base_background=COLORS["page"],
+            base_foreground=COLORS["text"],
+            hover_background=hover_color,
+            hover_foreground=accent,
         )
         button.grid(
             row=0,
@@ -1355,12 +1397,42 @@ class MouseGestureApp:
         return button
 
     @staticmethod
+    def _bind_button_hover(
+        button: tk.Button,
+        *,
+        base_background: str,
+        base_foreground: str,
+        hover_background: str,
+        hover_foreground: str,
+    ) -> None:
+        def apply_hover(_event: tk.Event[tk.Misc]) -> None:
+            if button.cget("state") != "disabled":
+                button.configure(
+                    bg=hover_background,
+                    fg=hover_foreground,
+                    highlightbackground=hover_foreground,
+                )
+
+        def clear_hover(_event: tk.Event[tk.Misc]) -> None:
+            button.configure(
+                bg=base_background,
+                fg=base_foreground,
+                highlightbackground=COLORS["line"],
+            )
+
+        button.bind("<Enter>", apply_hover, add="+")
+        button.bind("<Leave>", clear_hover, add="+")
+
+    @staticmethod
     def _adjustment_group(
         parent: tk.Frame,
         column: int,
         title: str,
         decrease: Callable[[], None],
         increase: Callable[[], None],
+        icon: str,
+        accent: str,
+        hover_color: str,
     ) -> None:
         group = tk.Frame(
             parent,
@@ -1378,28 +1450,39 @@ class MouseGestureApp:
         )
         tk.Label(
             group,
-            text=title,
+            text=f"{icon}  {title}",
             bg=COLORS["page"],
-            fg=COLORS["text"],
+            fg=accent,
             font=("Microsoft YaHei UI", 8, "bold"),
         ).pack()
         controls = tk.Frame(group, bg=COLORS["page"])
         controls.pack(pady=(3, 0))
         for text, command in (("－", decrease), ("＋", increase)):
-            tk.Button(
+            button = tk.Button(
                 controls,
                 text=text,
                 command=command,
                 bg=COLORS["card"],
-                fg=COLORS["blue"],
-                activebackground=COLORS["blue_soft"],
+                fg=accent,
+                activebackground=hover_color,
+                activeforeground=accent,
+                highlightbackground=COLORS["line"],
+                highlightthickness=1,
                 relief="flat",
                 bd=0,
                 cursor="hand2",
                 font=("Segoe UI", 8, "bold"),
                 width=3,
                 pady=1,
-            ).pack(side="left", padx=2)
+            )
+            MouseGestureApp._bind_button_hover(
+                button,
+                base_background=COLORS["card"],
+                base_foreground=accent,
+                hover_background=hover_color,
+                hover_foreground=accent,
+            )
+            button.pack(side="left", padx=2)
 
     def _build_encouragement(self, page: tk.Frame) -> None:
         self._new_encouragement()
@@ -1607,6 +1690,9 @@ class MouseGestureApp:
             messagebox.showerror("保存失败", str(exc))
             return
         self.custom_name_vars[index].set(name)
+        self.custom_quick_label_vars[index].set(
+            _quick_tool_label(CUSTOM_TOOL_ICONS[index], name)
+        )
         self._append_log(f"已更新自定义按钮：{name}", "success")
         self._show_toast("自定义按钮已保存", COLORS["green"])
 

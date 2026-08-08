@@ -16,7 +16,7 @@ def parse_version(path: Path) -> tuple[int, int] | None:
     return int(match.group(1)), int(match.group(2))
 
 
-def retain_latest_releases(directory: Path, keep: int = 2) -> list[Path]:
+def retain_latest_releases(directory: Path, keep: int = 1) -> list[Path]:
     if keep < 1:
         raise ValueError("keep must be at least 1")
     directory.mkdir(parents=True, exist_ok=True)
@@ -44,7 +44,7 @@ def main() -> None:
         description="Keep only the latest local EXE release versions."
     )
     parser.add_argument("directory", type=Path)
-    parser.add_argument("--keep", type=int, default=2)
+    parser.add_argument("--keep", type=int, default=1)
     args = parser.parse_args()
 
     deleted = retain_latest_releases(args.directory, args.keep)

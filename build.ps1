@@ -26,8 +26,8 @@ try {
     Write-Host "[4/6] Building one-file EXE..."
     python -m PyInstaller --noconfirm --clean "mouse_gesture_actions.spec"
 
-    Write-Host "[5/6] Retaining the latest two local versions..."
-    python tools\retain_latest_releases.py dist --keep 2
+    Write-Host "[5/6] Retaining only the latest local version..."
+    python tools\retain_latest_releases.py dist --keep 1
 
     $ExePath = Get-ChildItem (Join-Path $PSScriptRoot "dist") -Filter "*_$VersionTag.exe" |
         Select-Object -First 1

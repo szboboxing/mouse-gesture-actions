@@ -101,11 +101,6 @@ V1.0-V1.4 配置可继续读取；旧配置默认启用两枚侧键，已移除�
 ## 版本说明
 
 - [V1.6 版本说明](docs/releases/V1.6.md)
-- [V1.5 版本说明](docs/releases/V1.5.md)
-- [V1.4 版本说明](docs/releases/V1.4.md)
-- [V1.3 版本说明](docs/releases/V1.3.md)
-- [V1.2 版本说明](docs/releases/V1.2.md)
-- [V1.1 版本说明](docs/releases/V1.1.md)
 - [GitHub Releases](https://github.com/szboboxing/mouse-gesture-actions/releases)
 
 ## 版本与发布
@@ -113,7 +108,7 @@ V1.0-V1.4 配置可继续读取；旧配置默认启用两枚侧键，已移除�
 - 版本从 `V1.0` 开始按 `Vx.y` 递增。
 - 唯一版本来源是 `version.py` 中的 `APP_VERSION`。
 - Git 标签、版本文档和 GitHub Release 使用相同版本号。
-- 每次构建后，本地 `dist` 只保留版本号最高的两个 EXE。
+- 每次构建后，本地 `dist` 只保留版本号最高的一个 EXE。
 - 本地使用中文文件名，GitHub Release 使用 `mouse-gesture-actions-Vx.y.exe`。
 - Release 同时发布 `SHA256.txt`。
 
