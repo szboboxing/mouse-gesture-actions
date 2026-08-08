@@ -28,7 +28,7 @@ class VersionMetadataTests(unittest.TestCase):
 
 
 class ReleaseRetentionTests(unittest.TestCase):
-    def test_only_latest_version_is_retained(self) -> None:
+    def test_latest_two_versions_are_retained(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             for version in ("V1.9", "V2.0", "V2.1"):
@@ -42,11 +42,10 @@ class ReleaseRetentionTests(unittest.TestCase):
                 {path.name for path in deleted},
                 {
                     "鼠标手势动作小工具_V1.9.exe",
-                    "鼠标手势动作小工具_V2.0.exe",
                 },
             )
             self.assertFalse((root / "鼠标手势动作小工具_V1.9.exe").exists())
-            self.assertFalse((root / "鼠标手势动作小工具_V2.0.exe").exists())
+            self.assertTrue((root / "鼠标手势动作小工具_V2.0.exe").exists())
             self.assertTrue((root / "鼠标手势动作小工具_V2.1.exe").exists())
             self.assertTrue(unrelated.exists())
 

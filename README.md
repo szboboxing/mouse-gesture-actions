@@ -144,7 +144,7 @@ V1.0-V1.9 配置可继续读取；旧配置默认启用两枚截图侧键，并�
 
 ## 版本说明
 
-- [V2.1 版本说明（仅本地版本）](docs/releases/V2.1.md)
+- [V2.1 版本说明](docs/releases/V2.1.md)
 - [V2.0 版本说明（仅本地版本）](docs/releases/V2.0.md)
 - [V1.9 版本说明（仅本地版本）](docs/releases/V1.9.md)
 - [V1.8 版本说明](docs/releases/V1.8.md)
@@ -157,7 +157,8 @@ V1.0-V1.9 配置可继续读取；旧配置默认启用两枚截图侧键，并�
 - 版本从 `V1.0` 开始按 `Vx.y` 递增。
 - 唯一版本来源是 `version.py` 中的 `APP_VERSION`。
 - Git 标签、版本文档和 GitHub Release 使用相同版本号。
-- 每次构建后，本地 `dist` 只保留版本号最高的一个 EXE。
+- 每次构建后，本地 `dist` 自动保留版本号最高的两个 EXE。
+- 更改本地版本保留数量或规则前，必须先征得用户确认。
 - 本地使用中文文件名，GitHub Release 使用 `mouse-gesture-actions-Vx.y.exe`。
 - Release 同时发布 `SHA256.txt`。
 
