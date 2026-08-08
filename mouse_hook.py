@@ -8,7 +8,7 @@ import time
 from dataclasses import dataclass
 from ctypes import wintypes
 from enum import Enum
-from typing import Callable
+from typing import Callable, Iterable
 
 
 WH_MOUSE_LL = 14
@@ -193,6 +193,7 @@ class GlobalRightButtonActionHook:
         self._lock = threading.Lock()
         self._state = RightHoldGestureState()
         self._metrics = MouseMetricsTracker()
+        self._screenshot_xbuttons = {XBUTTON1, XBUTTON2}
         self._suppressed_xbuttons: set[int] = set()
         self._hook = None
         self._hook_thread: threading.Thread | None = None
@@ -226,6 +227,25 @@ class GlobalRightButtonActionHook:
     def set_test_mode(self, enabled: bool) -> None:
         with self._lock:
             self._test_mode = enabled
+            self._state.cancel()
+            self._suppressed_xbuttons.clear()
+
+    def set_screenshot_side_buttons(
+        self,
+        controls: Iterable[str | MouseControl],
+    ) -> None:
+        mapping = {
+            MouseControl.XBUTTON1.value: XBUTTON1,
+            MouseControl.XBUTTON2.value: XBUTTON2,
+        }
+        configured: set[int] = set()
+        for control in controls:
+            value = getattr(control, "value", control)
+            xbutton = mapping.get(value)
+            if xbutton is not None:
+                configured.add(xbutton)
+        with self._lock:
+            self._screenshot_xbuttons = configured
             self._state.cancel()
             self._suppressed_xbuttons.clear()
 
@@ -391,13 +411,18 @@ class GlobalRightButtonActionHook:
                 elif message == WM_XBUTTONDOWN:
                     xbutton = _high_word(data.mouseData)
                     if xbutton in (XBUTTON1, XBUTTON2):
-                        if self._state.active and self._is_right_button_down():
+                        right_button_down = self._is_right_button_down()
+                        if (
+                            xbutton in self._screenshot_xbuttons
+                            and self._state.active
+                            and right_button_down
+                        ):
                             action = self._state.press_side_button().action
                             self._suppressed_xbuttons.add(xbutton)
                             consume = True
                         else:
                             self._suppressed_xbuttons.discard(xbutton)
-                            if self._state.active:
+                            if self._state.active and not right_button_down:
                                 self._state.cancel()
                 elif message == WM_XBUTTONUP:
                     xbutton = _high_word(data.mouseData)

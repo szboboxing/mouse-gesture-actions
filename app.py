@@ -79,6 +79,23 @@ MOUSE_TEST_LABELS = {
     MouseControl.XBUTTON1: "上一页 / XButton1",
     MouseControl.XBUTTON2: "下一页 / XButton2",
 }
+SIDE_BUTTON_CONTROLS = (
+    MouseControl.XBUTTON1,
+    MouseControl.XBUTTON2,
+)
+SIDE_BUTTON_NAMES = {
+    MouseControl.XBUTTON1: "上一页侧键",
+    MouseControl.XBUTTON2: "下一页侧键",
+}
+
+
+def _side_button_config_text(side_buttons: tuple[str, ...]) -> str:
+    names = [
+        SIDE_BUTTON_NAMES[control]
+        for control in SIDE_BUTTON_CONTROLS
+        if control.value in side_buttons
+    ]
+    return f"已保存截图侧键：{'、'.join(names)}"
 
 
 class GestureCard(tk.Frame):
@@ -202,8 +219,12 @@ class MouseGestureApp:
             self._on_held_action,
             self._on_mouse_test_event,
         )
+        self.hook.set_screenshot_side_buttons(
+            self.settings.screenshot_side_buttons
+        )
         self.usage_counts: Counter[str] = Counter()
         self.mouse_test_counts: Counter[MouseControl] = Counter()
+        self.detected_side_buttons: set[MouseControl] = set()
         self.listening = False
         self.active_page = "dashboard"
         self.toast: tk.Toplevel | None = None
@@ -233,6 +254,14 @@ class MouseGestureApp:
         self.mouse_test_count_vars = {
             control: tk.StringVar(value="0") for control in MouseControl
         }
+        self.side_button_config_var = tk.StringVar(
+            value=_side_button_config_text(
+                self.settings.screenshot_side_buttons
+            )
+        )
+        self.side_button_confirm_var = tk.StringVar(
+            value="侧键无反应时，请重新确认并保存检测结果。"
+        )
         self.custom_name_vars = (
             tk.StringVar(value=self.settings.custom_button_1_name),
             tk.StringVar(value=self.settings.custom_button_2_name),
@@ -561,8 +590,8 @@ class MouseGestureApp:
             (
                 "xbutton1",
                 "侧键截图",
-                "右键按住 + 任一侧键",
-                "调用 Win+Shift+S；未按右键时正常前进/后退",
+                "右键按住 + 已确认侧键",
+                "测试页可重新确认保存；普通侧键保持前进/后退",
                 COLORS["orange"],
             ),
         )
@@ -802,7 +831,7 @@ class MouseGestureApp:
         ).pack(anchor="w", pady=(5, 0))
         tk.Label(
             header,
-            text="实时检测 · 按键完整透传",
+            text="实时检测 · 可确认保存侧键",
             bg=COLORS["green_soft"],
             fg=COLORS["green"],
             padx=14,
@@ -926,6 +955,71 @@ class MouseGestureApp:
                 font=("Segoe UI", 10, "bold"),
             ).pack(side="right")
 
+        side_config = tk.Frame(
+            details,
+            bg=COLORS["orange_soft"],
+            padx=12,
+            pady=10,
+        )
+        side_config.grid(row=3, column=0, sticky="ew", pady=(12, 0))
+        tk.Label(
+            side_config,
+            text="侧键截图确认",
+            bg=COLORS["orange_soft"],
+            fg=COLORS["orange"],
+            font=("Microsoft YaHei UI", 9, "bold"),
+        ).pack(anchor="w")
+        tk.Label(
+            side_config,
+            textvariable=self.side_button_config_var,
+            bg=COLORS["orange_soft"],
+            fg=COLORS["text"],
+            font=("Microsoft YaHei UI", 8, "bold"),
+            justify="left",
+            wraplength=270,
+        ).pack(anchor="w", pady=(4, 0))
+        tk.Label(
+            side_config,
+            textvariable=self.side_button_confirm_var,
+            bg=COLORS["orange_soft"],
+            fg=COLORS["muted"],
+            font=("Microsoft YaHei UI", 8),
+            justify="left",
+            wraplength=270,
+        ).pack(anchor="w", pady=(3, 7))
+        side_buttons = tk.Frame(side_config, bg=COLORS["orange_soft"])
+        side_buttons.pack(fill="x")
+        tk.Button(
+            side_buttons,
+            text="重新确认侧键",
+            command=self._begin_side_button_reconfirmation,
+            bg=COLORS["card"],
+            fg=COLORS["orange"],
+            activebackground=COLORS["page"],
+            activeforeground=COLORS["orange"],
+            relief="flat",
+            bd=0,
+            cursor="hand2",
+            padx=8,
+            pady=6,
+            font=("Microsoft YaHei UI", 8, "bold"),
+        ).pack(side="left", fill="x", expand=True, padx=(0, 4))
+        tk.Button(
+            side_buttons,
+            text="保存检测结果",
+            command=self._save_detected_side_buttons,
+            bg=COLORS["green"],
+            fg="#FFFFFF",
+            activebackground="#17875F",
+            activeforeground="#FFFFFF",
+            relief="flat",
+            bd=0,
+            cursor="hand2",
+            padx=8,
+            pady=6,
+            font=("Microsoft YaHei UI", 8, "bold"),
+        ).pack(side="left", fill="x", expand=True, padx=(4, 0))
+
         tk.Button(
             details,
             text="清空测试记录",
@@ -940,7 +1034,7 @@ class MouseGestureApp:
             padx=14,
             pady=9,
             font=("Microsoft YaHei UI", 9, "bold"),
-        ).grid(row=3, column=0, sticky="ew", pady=(14, 0))
+        ).grid(row=4, column=0, sticky="ew", pady=(10, 0))
 
     def _draw_mouse_test_mouse(self, canvas: tk.Canvas) -> None:
         self.mouse_test_items.clear()
@@ -1544,6 +1638,7 @@ class MouseGestureApp:
         self.settings = AppSettings(
             launch_listening=self.launch_var.get(),
             minimize_on_start=self.minimize_var.get(),
+            screenshot_side_buttons=self.settings.screenshot_side_buttons,
             custom_button_1_name=self.settings.custom_button_1_name,
             custom_button_1_target=self.settings.custom_button_1_target,
             custom_button_2_name=self.settings.custom_button_2_name,
@@ -1581,6 +1676,9 @@ class MouseGestureApp:
             self.mouse_test_status_var.set(
                 f"检测到：{MOUSE_TEST_LABELS[control]}"
             )
+            if control in SIDE_BUTTON_CONTROLS:
+                self.detected_side_buttons.add(control)
+                self._refresh_side_button_confirmation()
         self._set_mouse_test_visual(control, event.pressed)
 
         if control in (MouseControl.WHEEL_UP, MouseControl.WHEEL_DOWN):
@@ -1630,10 +1728,85 @@ class MouseGestureApp:
 
     def _reset_mouse_test(self) -> None:
         self.mouse_test_counts.clear()
+        self.detected_side_buttons.clear()
         self.mouse_test_status_var.set("等待操作")
+        self.side_button_confirm_var.set(
+            "测试记录已清空；已保存的截图侧键配置保持不变。"
+        )
         for variable in self.mouse_test_count_vars.values():
             variable.set("0")
         self._clear_mouse_test_pressed()
+
+    def _begin_side_button_reconfirmation(self) -> None:
+        self.detected_side_buttons.clear()
+        for control in SIDE_BUTTON_CONTROLS:
+            self.mouse_test_counts[control] = 0
+            self.mouse_test_count_vars[control].set("0")
+            self._set_mouse_test_visual(control, False)
+        self.mouse_test_status_var.set("请依次按下鼠标的两枚侧键")
+        self.side_button_confirm_var.set(
+            "等待侧键信号；按下可用的上一页、下一页侧键。"
+        )
+
+    def _refresh_side_button_confirmation(self) -> None:
+        names = [
+            SIDE_BUTTON_NAMES[control]
+            for control in SIDE_BUTTON_CONTROLS
+            if control in self.detected_side_buttons
+        ]
+        if len(names) == len(SIDE_BUTTON_CONTROLS):
+            text = "两枚侧键均已检测，请点击“保存检测结果”。"
+        elif names:
+            text = (
+                f"已检测：{'、'.join(names)}；可继续测试另一枚，"
+                "或直接保存当前侧键。"
+            )
+        else:
+            text = "尚未检测到侧键。"
+        self.side_button_confirm_var.set(text)
+
+    def _save_detected_side_buttons(self) -> None:
+        if not self.detected_side_buttons:
+            messagebox.showwarning(
+                "未检测到侧键",
+                "请先按下鼠标侧键。\n\n"
+                "若图示没有反应，请在鼠标驱动中将侧键恢复为"
+                "“浏览器上一页/下一页（XButton1/XButton2）”，"
+                "然后重新确认。",
+                parent=self.root,
+            )
+            return
+
+        side_buttons = tuple(
+            control.value
+            for control in SIDE_BUTTON_CONTROLS
+            if control in self.detected_side_buttons
+        )
+        self.settings.screenshot_side_buttons = side_buttons
+        try:
+            self.settings.save()
+        except OSError as exc:
+            messagebox.showerror(
+                "保存失败",
+                str(exc),
+                parent=self.root,
+            )
+            return
+
+        self.hook.set_screenshot_side_buttons(side_buttons)
+        self.side_button_config_var.set(
+            _side_button_config_text(side_buttons)
+        )
+        self.side_button_confirm_var.set(
+            "配置已保存；返回功能首页后，按住右键加已确认侧键即可截图。"
+        )
+        names = "、".join(
+            SIDE_BUTTON_NAMES[control]
+            for control in SIDE_BUTTON_CONTROLS
+            if control in self.detected_side_buttons
+        )
+        self._append_log(f"侧键截图配置已保存：{names}", "success")
+        self._show_toast("侧键截图配置已保存", COLORS["green"])
 
     def _execute_held_action(
         self,

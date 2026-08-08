@@ -128,6 +128,7 @@ class SideButtonHookTests(unittest.TestCase):
         hook._lock = threading.Lock()
         hook._state = RightHoldGestureState()
         hook._metrics = MouseMetricsTracker()
+        hook._screenshot_xbuttons = {XBUTTON1, XBUTTON2}
         hook._suppressed_xbuttons = set()
         hook._action_queue = queue.Queue()
         hook._user32 = FakeUser32(right_button_down)
@@ -185,6 +186,47 @@ class SideButtonHookTests(unittest.TestCase):
                 self.assertEqual(action, HeldMouseAction.SCREENSHOT)
                 self.assertFalse(hook._suppressed_xbuttons)
                 hook._call_next.assert_not_called()
+
+    def test_only_confirmed_side_buttons_trigger_screenshot(self) -> None:
+        hook = self._hook(right_button_down=True)
+        hook.set_screenshot_side_buttons((MouseControl.XBUTTON1,))
+        hook._state.press_right()
+
+        unconfirmed_down = self._mouse_event(
+            hook,
+            WM_XBUTTONDOWN,
+            XBUTTON2,
+        )
+        unconfirmed_up = self._mouse_event(
+            hook,
+            WM_XBUTTONUP,
+            XBUTTON2,
+        )
+        confirmed_down = self._mouse_event(
+            hook,
+            WM_XBUTTONDOWN,
+            XBUTTON1,
+        )
+        confirmed_up = self._mouse_event(
+            hook,
+            WM_XBUTTONUP,
+            XBUTTON1,
+        )
+
+        self.assertEqual(
+            (
+                unconfirmed_down,
+                unconfirmed_up,
+                confirmed_down,
+                confirmed_up,
+            ),
+            (73, 73, 1, 1),
+        )
+        self.assertEqual(
+            hook._action_queue.get_nowait(),
+            HeldMouseAction.SCREENSHOT,
+        )
+        self.assertTrue(hook._action_queue.empty())
 
     def test_stale_right_hold_does_not_swallow_side_button(self) -> None:
         hook = self._hook(right_button_down=False)
