@@ -15,7 +15,80 @@ class ShutdownTests(unittest.TestCase):
         application.hook._dispatch_thread = None
         application._closing = False
         application._shutdown_watchdog = None
+        application._close_dialog = None
+        application._close_cancel_button = None
         return application
+
+    def test_close_choices_confirm_minimize_or_cancel(self) -> None:
+        application = self._make_application()
+        application.close = MagicMock()
+
+        self.assertEqual(
+            app.CLOSE_DIALOG_BUTTON_LABELS,
+            ("确认关闭", "最小化", "取消"),
+        )
+
+        application._apply_close_choice(app.CLOSE_CHOICE_CONFIRM)
+        application.close.assert_called_once_with()
+        application.root.iconify.assert_not_called()
+
+        application.close.reset_mock()
+        application._apply_close_choice(app.CLOSE_CHOICE_MINIMIZE)
+        application.close.assert_not_called()
+        application.root.iconify.assert_called_once_with()
+
+        application.root.iconify.reset_mock()
+        application._apply_close_choice(app.CLOSE_CHOICE_CANCEL)
+        application.close.assert_not_called()
+        application.root.iconify.assert_not_called()
+
+    def test_repeated_close_request_reuses_existing_dialog(self) -> None:
+        application = self._make_application()
+        dialog = MagicMock()
+        dialog.winfo_exists.return_value = True
+        application._close_dialog = dialog
+
+        application._request_close()
+
+        dialog.lift.assert_called_once_with()
+        dialog.focus_force.assert_called_once_with()
+
+    def test_cancel_button_receives_focus_and_mouse_pointer(self) -> None:
+        application = self._make_application()
+        dialog = MagicMock()
+        dialog.winfo_exists.return_value = True
+        cancel_button = MagicMock()
+        cancel_button.winfo_width.return_value = 100
+        cancel_button.winfo_height.return_value = 30
+
+        application._focus_close_cancel_button(dialog, cancel_button)
+
+        cancel_button.focus_set.assert_called_once_with()
+        cancel_button.update_idletasks.assert_called_once_with()
+        cancel_button.event_generate.assert_called_once_with(
+            "<Motion>",
+            warp=True,
+            x=50,
+            y=15,
+        )
+
+    def test_finishing_close_request_destroys_dialog_first(self) -> None:
+        application = self._make_application()
+        dialog = MagicMock()
+        dialog.winfo_exists.return_value = True
+        application._close_dialog = dialog
+        application._close_cancel_button = MagicMock()
+        application._apply_close_choice = MagicMock()
+
+        application._finish_close_request(app.CLOSE_CHOICE_CANCEL)
+
+        dialog.grab_release.assert_called_once_with()
+        dialog.destroy.assert_called_once_with()
+        self.assertIsNone(application._close_dialog)
+        self.assertIsNone(application._close_cancel_button)
+        application._apply_close_choice.assert_called_once_with(
+            app.CLOSE_CHOICE_CANCEL
+        )
 
     @patch("app.threading.Timer")
     def test_close_is_idempotent_and_arms_watchdog(

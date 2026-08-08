@@ -69,6 +69,10 @@ COLORS = {
 
 CUSTOM_TOOL_ICONS = ("◇", "◆")
 SHUTDOWN_WATCHDOG_SECONDS = 6.0
+CLOSE_CHOICE_CONFIRM = "confirm"
+CLOSE_CHOICE_MINIMIZE = "minimize"
+CLOSE_CHOICE_CANCEL = "cancel"
+CLOSE_DIALOG_BUTTON_LABELS = ("确认关闭", "最小化", "取消")
 
 
 def _quick_tool_label(icon: str, label: str) -> str:
@@ -314,6 +318,8 @@ class MouseGestureApp:
         self.mouse_test_canvas: tk.Canvas | None = None
         self._closing = False
         self._shutdown_watchdog: threading.Timer | None = None
+        self._close_dialog: tk.Toplevel | None = None
+        self._close_cancel_button: tk.Button | None = None
 
         self.launch_var = tk.BooleanVar(value=self.settings.launch_listening)
         self.minimize_var = tk.BooleanVar(
@@ -394,7 +400,7 @@ class MouseGestureApp:
         self._configure_window()
         self._configure_styles()
         self._build_layout()
-        self.root.protocol("WM_DELETE_WINDOW", self.close)
+        self.root.protocol("WM_DELETE_WINDOW", self._request_close)
         self.root.after(60, self._poll_ui_events)
         self.root.after(300, self._refresh_metrics)
         self.root.after(150, self._start_hook)
@@ -2543,6 +2549,169 @@ class MouseGestureApp:
             self.toast.destroy()
         self.toast = None
         self.toast_after_id = None
+
+    def _request_close(self) -> None:
+        if self._closing:
+            return
+        if (
+            self._close_dialog is not None
+            and self._close_dialog.winfo_exists()
+        ):
+            self._close_dialog.lift()
+            self._close_dialog.focus_force()
+            return
+
+        dialog = tk.Toplevel(self.root)
+        self._close_dialog = dialog
+        dialog.title("关闭软件")
+        dialog.configure(bg=COLORS["card"])
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        content = tk.Frame(dialog, bg=COLORS["card"], padx=24, pady=20)
+        content.pack(fill="both", expand=True)
+        tk.Label(
+            content,
+            text="请选择关闭主窗口后的操作",
+            bg=COLORS["card"],
+            fg=COLORS["text"],
+            font=("Microsoft YaHei UI", 12, "bold"),
+        ).pack(anchor="w")
+        tk.Label(
+            content,
+            text="为防止误关，默认操作为取消。",
+            bg=COLORS["card"],
+            fg=COLORS["muted"],
+            font=("Microsoft YaHei UI", 9),
+        ).pack(anchor="w", pady=(7, 18))
+
+        buttons = tk.Frame(content, bg=COLORS["card"])
+        buttons.pack(fill="x")
+        tk.Button(
+            buttons,
+            text=CLOSE_DIALOG_BUTTON_LABELS[0],
+            command=lambda: self._finish_close_request(
+                CLOSE_CHOICE_CONFIRM
+            ),
+            bg=COLORS["red"],
+            fg="#FFFFFF",
+            activebackground="#C93D51",
+            activeforeground="#FFFFFF",
+            relief="flat",
+            bd=0,
+            cursor="hand2",
+            width=10,
+            pady=5,
+            font=("Microsoft YaHei UI", 9, "bold"),
+        ).pack(side="left")
+        tk.Button(
+            buttons,
+            text=CLOSE_DIALOG_BUTTON_LABELS[1],
+            command=lambda: self._finish_close_request(
+                CLOSE_CHOICE_MINIMIZE
+            ),
+            bg=COLORS["blue_soft"],
+            fg=COLORS["blue"],
+            activebackground="#DDE3FF",
+            activeforeground=COLORS["blue"],
+            relief="flat",
+            bd=0,
+            cursor="hand2",
+            width=10,
+            pady=5,
+            font=("Microsoft YaHei UI", 9, "bold"),
+        ).pack(side="left", padx=12)
+        cancel_button = tk.Button(
+            buttons,
+            text=CLOSE_DIALOG_BUTTON_LABELS[2],
+            command=lambda: self._finish_close_request(
+                CLOSE_CHOICE_CANCEL
+            ),
+            bg=COLORS["blue"],
+            fg="#FFFFFF",
+            activebackground="#405ED9",
+            activeforeground="#FFFFFF",
+            relief="flat",
+            bd=0,
+            cursor="hand2",
+            width=10,
+            pady=5,
+            font=("Microsoft YaHei UI", 9, "bold"),
+            default=tk.ACTIVE,
+        )
+        cancel_button.pack(side="left")
+        self._close_cancel_button = cancel_button
+
+        dialog.protocol(
+            "WM_DELETE_WINDOW",
+            lambda: self._finish_close_request(CLOSE_CHOICE_CANCEL),
+        )
+        dialog.bind(
+            "<Escape>",
+            lambda _event: self._finish_close_request(
+                CLOSE_CHOICE_CANCEL
+            ),
+        )
+        dialog.bind(
+            "<Return>",
+            lambda _event: self._finish_close_request(
+                CLOSE_CHOICE_CANCEL
+            ),
+        )
+        dialog.update_idletasks()
+        width = 390
+        height = 166
+        x = self.root.winfo_rootx() + max(
+            0,
+            (self.root.winfo_width() - width) // 2,
+        )
+        y = self.root.winfo_rooty() + max(
+            0,
+            (self.root.winfo_height() - height) // 2,
+        )
+        dialog.geometry(f"{width}x{height}+{x}+{y}")
+        dialog.after(
+            80,
+            lambda: self._focus_close_cancel_button(
+                dialog,
+                cancel_button,
+            ),
+        )
+
+    def _focus_close_cancel_button(
+        self,
+        dialog: tk.Toplevel,
+        cancel_button: tk.Button,
+    ) -> None:
+        if not dialog.winfo_exists():
+            return
+        cancel_button.focus_set()
+        cancel_button.update_idletasks()
+        cancel_button.event_generate(
+            "<Motion>",
+            warp=True,
+            x=max(1, cancel_button.winfo_width() // 2),
+            y=max(1, cancel_button.winfo_height() // 2),
+        )
+
+    def _finish_close_request(self, choice: str) -> None:
+        dialog = self._close_dialog
+        self._close_dialog = None
+        self._close_cancel_button = None
+        if dialog is not None and dialog.winfo_exists():
+            try:
+                dialog.grab_release()
+            except tk.TclError:
+                pass
+            dialog.destroy()
+        self._apply_close_choice(choice)
+
+    def _apply_close_choice(self, choice: str) -> None:
+        if choice == CLOSE_CHOICE_CONFIRM:
+            self.close()
+        elif choice == CLOSE_CHOICE_MINIMIZE:
+            self.root.iconify()
 
     def close(self) -> None:
         if self._closing:
