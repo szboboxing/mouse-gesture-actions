@@ -16,6 +16,12 @@ KEYBOARD_MAPPING_KEYS = (
     tuple(chr(code) for code in range(ord("A"), ord("Z") + 1))
     + tuple(f"F{number}" for number in range(1, 13))
 )
+KEYBOARD_MAPPING_ACTION_SHORTCUT = "shortcut"
+KEYBOARD_MAPPING_ACTION_ENHANCED_PASTE = "enhanced_paste"
+KEYBOARD_MAPPING_ACTIONS = (
+    KEYBOARD_MAPPING_ACTION_SHORTCUT,
+    KEYBOARD_MAPPING_ACTION_ENHANCED_PASTE,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,6 +30,7 @@ class KeyboardMappingSettings:
     modifiers: tuple[str, ...]
     key: str
     enabled: bool = False
+    action: str = KEYBOARD_MAPPING_ACTION_SHORTCUT
 
 
 def default_keyboard_mappings() -> tuple[KeyboardMappingSettings, ...]:
@@ -71,6 +78,10 @@ def _normalize_keyboard_mappings(
         if key not in KEYBOARD_MAPPING_KEYS:
             key = default.key
 
+        action = str(raw.get("action", default.action)).lower()
+        if action not in KEYBOARD_MAPPING_ACTIONS:
+            action = default.action
+
         enabled = raw.get("enabled") is True
         if enabled and mouse_button in enabled_mouse_buttons:
             enabled = False
@@ -82,6 +93,7 @@ def _normalize_keyboard_mappings(
                 modifiers,
                 key,
                 enabled,
+                action,
             )
         )
     return tuple(normalized)

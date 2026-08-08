@@ -23,6 +23,8 @@ from mouse_hook import (
     MouseTestEvent,
 )
 from settings import (
+    KEYBOARD_MAPPING_ACTION_ENHANCED_PASTE,
+    KEYBOARD_MAPPING_ACTION_SHORTCUT,
     KEYBOARD_MAPPING_KEYS,
     AppSettings,
     KeyboardMappingSettings,
@@ -151,6 +153,8 @@ def _side_button_config_text(side_buttons: tuple[str, ...]) -> str:
 
 
 def _keyboard_shortcut_text(mapping: KeyboardMappingSettings) -> str:
+    if mapping.action == KEYBOARD_MAPPING_ACTION_ENHANCED_PASTE:
+        return "增强粘贴"
     parts = [
         KEYBOARD_MAPPING_MODIFIER_LABELS[modifier]
         for modifier in mapping.modifiers
@@ -370,6 +374,15 @@ class MouseGestureApp:
         )
         self.keyboard_mapping_enabled_vars = tuple(
             tk.BooleanVar(value=mapping.enabled)
+            for mapping in self.settings.keyboard_mappings
+        )
+        self.keyboard_mapping_enhanced_paste_vars = tuple(
+            tk.BooleanVar(
+                value=(
+                    mapping.action
+                    == KEYBOARD_MAPPING_ACTION_ENHANCED_PASTE
+                )
+            )
             for mapping in self.settings.keyboard_mappings
         )
         self.keyboard_mapping_preview_vars = tuple(
@@ -1409,13 +1422,32 @@ class MouseGestureApp:
                 fg=COLORS["text"],
                 font=("Microsoft YaHei UI", 9, "bold"),
             ).pack(side="left")
+            button = tk.Button(
+                summary,
+                text="启动",
+                command=lambda target=index: (
+                    self._toggle_keyboard_mapping(target)
+                ),
+                bg=COLORS["blue"],
+                fg="#FFFFFF",
+                activebackground="#405ED9",
+                activeforeground="#FFFFFF",
+                relief="flat",
+                bd=0,
+                cursor="hand2",
+                padx=13,
+                pady=3,
+                font=("Microsoft YaHei UI", 8, "bold"),
+            )
+            button.pack(side="right")
+            self.keyboard_mapping_buttons.append(button)
             tk.Label(
                 summary,
                 textvariable=self.keyboard_mapping_preview_vars[index],
                 bg=COLORS["page"],
                 fg=COLORS["muted"],
                 font=("Microsoft YaHei UI", 8),
-            ).pack(side="right")
+            ).pack(side="right", padx=(0, 7))
 
             controls = tk.Frame(card, bg=COLORS["page"])
             controls.pack(fill="x")
@@ -1464,25 +1496,15 @@ class MouseGestureApp:
                 ),
             )
 
-            button = tk.Button(
+            ttk.Checkbutton(
                 controls,
-                text="启动",
+                text="增强粘贴",
+                variable=self.keyboard_mapping_enhanced_paste_vars[index],
                 command=lambda target=index: (
-                    self._toggle_keyboard_mapping(target)
+                    self._on_keyboard_mapping_changed(target)
                 ),
-                bg=COLORS["blue"],
-                fg="#FFFFFF",
-                activebackground="#405ED9",
-                activeforeground="#FFFFFF",
-                relief="flat",
-                bd=0,
-                cursor="hand2",
-                padx=13,
-                pady=3,
-                font=("Microsoft YaHei UI", 8, "bold"),
-            )
-            button.pack(side="right")
-            self.keyboard_mapping_buttons.append(button)
+                style="Mapping.TCheckbutton",
+            ).pack(side="left", padx=(0, 3))
             self._refresh_keyboard_mapping_ui(index)
 
     def _build_quick_tools(self, page: tk.Frame) -> None:
@@ -1987,6 +2009,11 @@ class MouseGestureApp:
             key = self.keyboard_mapping_key_vars[index].get().upper()
             if key not in KEYBOARD_MAPPING_KEYS:
                 key = current.key
+            action = (
+                KEYBOARD_MAPPING_ACTION_ENHANCED_PASTE
+                if self.keyboard_mapping_enhanced_paste_vars[index].get()
+                else KEYBOARD_MAPPING_ACTION_SHORTCUT
+            )
             mappings.append(
                 KeyboardMappingSettings(
                     mouse_button=mouse_button,
@@ -1995,6 +2022,7 @@ class MouseGestureApp:
                     enabled=self.keyboard_mapping_enabled_vars[
                         index
                     ].get(),
+                    action=action,
                 )
             )
         return tuple(mappings)
@@ -2014,6 +2042,10 @@ class MouseGestureApp:
                 variable.set(modifier in mapping.modifiers)
             self.keyboard_mapping_enabled_vars[index].set(
                 mapping.enabled
+            )
+            self.keyboard_mapping_enhanced_paste_vars[index].set(
+                mapping.action
+                == KEYBOARD_MAPPING_ACTION_ENHANCED_PASTE
             )
             self._refresh_keyboard_mapping_ui(index)
 
@@ -2198,10 +2230,15 @@ class MouseGestureApp:
             return
         if not mapping.enabled:
             return
-        action_result = self.actions.send_custom_shortcut(
-            mapping.modifiers,
-            mapping.key,
-        )
+        if mapping.action == KEYBOARD_MAPPING_ACTION_ENHANCED_PASTE:
+            action_result = (
+                self.actions.create_folder_and_paste_clipboard()
+            )
+        else:
+            action_result = self.actions.send_custom_shortcut(
+                mapping.modifiers,
+                mapping.key,
+            )
         event_type = "success" if action_result.success else "error"
         self.ui_events.put(
             (
@@ -2416,7 +2453,13 @@ class MouseGestureApp:
         if action_result.detail:
             text += f"\n{action_result.detail}"
         if action_result.success:
-            self._record_usage("keyboard_mapping")
+            usage_key = (
+                HeldMouseAction.ENHANCED_PASTE.value
+                if mapping.action
+                == KEYBOARD_MAPPING_ACTION_ENHANCED_PASTE
+                else "keyboard_mapping"
+            )
+            self._record_usage(usage_key)
 
         self._append_log(text, event_type)
         self._show_toast(

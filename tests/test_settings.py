@@ -4,6 +4,9 @@ import unittest
 
 from settings import (
     AppSettings,
+    KEYBOARD_MAPPING_ACTION_ENHANCED_PASTE,
+    KEYBOARD_MAPPING_ACTION_SHORTCUT,
+    KEYBOARD_MAPPING_ACTIONS,
     KEYBOARD_MAPPING_KEYS,
     KEYBOARD_MAPPING_MODIFIERS,
     KeyboardMappingSettings,
@@ -22,6 +25,13 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(KEYBOARD_MAPPING_KEYS[-12:], tuple(
             f"F{number}" for number in range(1, 13)
         ))
+        self.assertEqual(
+            KEYBOARD_MAPPING_ACTIONS,
+            (
+                KEYBOARD_MAPPING_ACTION_SHORTCUT,
+                KEYBOARD_MAPPING_ACTION_ENHANCED_PASTE,
+            ),
+        )
 
     def test_old_gesture_and_combo_settings_are_ignored(self) -> None:
         settings = AppSettings.from_mapping(
@@ -110,6 +120,7 @@ class SettingsTests(unittest.TestCase):
                         ],
                         "key": "f12",
                         "enabled": True,
+                        "action": "ENHANCED_PASTE",
                     },
                     {
                         "mouse_button": "xbutton1",
@@ -129,6 +140,7 @@ class SettingsTests(unittest.TestCase):
                     ("ctrl", "alt", "shift", "win"),
                     "F12",
                     True,
+                    KEYBOARD_MAPPING_ACTION_ENHANCED_PASTE,
                 ),
                 KeyboardMappingSettings(
                     "xbutton1",
@@ -148,6 +160,7 @@ class SettingsTests(unittest.TestCase):
                         "modifiers": "ctrl",
                         "key": "F13",
                         "enabled": "yes",
+                        "action": "unknown",
                     }
                 ]
             }
@@ -158,6 +171,10 @@ class SettingsTests(unittest.TestCase):
             KeyboardMappingSettings(
                 "xbutton1", ("ctrl",), "C", False
             ),
+        )
+        self.assertEqual(
+            settings.keyboard_mappings[0].action,
+            KEYBOARD_MAPPING_ACTION_SHORTCUT,
         )
 
     def test_only_one_mapping_can_enable_the_same_side_button(self) -> None:
