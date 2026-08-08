@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import ctypes
+import os
 import queue
 import random
 import sys
+import threading
 import tkinter as tk
 from collections import Counter
 from ctypes import wintypes
@@ -21,6 +23,20 @@ from mouse_hook import (
 )
 from settings import AppSettings, load_settings
 from version import APP_NAME, VERSION_TAG
+
+
+def _force_exit_current_process(exit_code: int) -> None:
+    kernel32 = ctypes.windll.kernel32
+    kernel32.GetCurrentProcess.argtypes = ()
+    kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+    kernel32.TerminateProcess.argtypes = (
+        wintypes.HANDLE,
+        wintypes.UINT,
+    )
+    kernel32.TerminateProcess.restype = wintypes.BOOL
+    process = kernel32.GetCurrentProcess()
+    kernel32.TerminateProcess(process, exit_code)
+    os._exit(exit_code)
 
 
 COLORS = {
@@ -44,6 +60,7 @@ COLORS = {
 }
 
 CUSTOM_TOOL_ICONS = ("◇", "◆")
+SHUTDOWN_WATCHDOG_SECONDS = 6.0
 
 
 def _quick_tool_label(icon: str, label: str) -> str:
@@ -245,6 +262,8 @@ class MouseGestureApp:
         self.mouse_test_status_labels: dict[MouseControl, tk.Label] = {}
         self.mouse_test_after_ids: dict[MouseControl, str] = {}
         self.mouse_test_canvas: tk.Canvas | None = None
+        self._closing = False
+        self._shutdown_watchdog: threading.Timer | None = None
 
         self.launch_var = tk.BooleanVar(value=self.settings.launch_listening)
         self.minimize_var = tk.BooleanVar(
@@ -1997,8 +2016,23 @@ class MouseGestureApp:
         self.toast_after_id = None
 
     def close(self) -> None:
-        self.hook.stop()
-        self.root.destroy()
+        if self._closing:
+            return
+        self._closing = True
+        self._shutdown_watchdog = threading.Timer(
+            SHUTDOWN_WATCHDOG_SECONDS,
+            _force_exit_current_process,
+            args=(0,),
+        )
+        self._shutdown_watchdog.daemon = True
+        self._shutdown_watchdog.start()
+        try:
+            self.hook.stop()
+        except Exception:
+            pass
+        finally:
+            self.root.quit()
+            self.root.destroy()
 
 
 def enable_dpi_awareness() -> None:
@@ -2050,12 +2084,16 @@ def main() -> None:
     mutex = acquire_single_instance()
     if mutex is None:
         return
+    normal_shutdown = False
     try:
         root = tk.Tk()
         MouseGestureApp(root)
         root.mainloop()
+        normal_shutdown = True
     finally:
         ctypes.windll.kernel32.CloseHandle(mutex)
+    if normal_shutdown:
+        _force_exit_current_process(0)
 
 
 if __name__ == "__main__":

@@ -282,6 +282,10 @@ class GlobalRightButtonActionHook:
 
     def stop(self) -> None:
         self.set_enabled(False)
+        hook_to_remove = self._hook
+        if hook_to_remove:
+            if self._user32.UnhookWindowsHookEx(hook_to_remove):
+                self._hook = None
         if self._hook_thread_id:
             self._user32.PostThreadMessageW(
                 self._hook_thread_id, WM_QUIT, 0, 0
