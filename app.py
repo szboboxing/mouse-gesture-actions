@@ -186,18 +186,12 @@ class MouseGestureApp:
         self.settings = load_settings()
         self.actions = SystemActions()
         self.ui_events: queue.Queue[tuple[str, object]] = queue.Queue()
-        self.hook = GlobalRightButtonActionHook(
-            self._on_held_action,
-            self.settings.screenshot_combo_interval_ms,
-        )
+        self.hook = GlobalRightButtonActionHook(self._on_held_action)
         self.usage_counts: Counter[str] = Counter()
         self.listening = False
         self.toast: tk.Toplevel | None = None
         self.toast_after_id: str | None = None
 
-        self.interval_var = tk.IntVar(
-            value=self.settings.screenshot_combo_interval_ms
-        )
         self.launch_var = tk.BooleanVar(value=self.settings.launch_listening)
         self.minimize_var = tk.BooleanVar(
             value=self.settings.minimize_on_start
@@ -264,14 +258,6 @@ class MouseGestureApp:
             fieldbackground=[("readonly", COLORS["card"])],
             selectbackground=[("readonly", COLORS["card"])],
             selectforeground=[("readonly", COLORS["text"])],
-        )
-        style.configure(
-            "App.TSpinbox",
-            fieldbackground=COLORS["card"],
-            foreground=COLORS["text"],
-            bordercolor=COLORS["line"],
-            arrowcolor=COLORS["blue"],
-            padding=6,
         )
         style.configure(
             "App.TCheckbutton",
@@ -388,7 +374,7 @@ class MouseGestureApp:
         ).pack(anchor="w", pady=(0, 9))
         for text in (
             "1  按住鼠标右键",
-            "2  滚动滚轮或按 XButton1",
+            "2  滚动滚轮或按任一侧键",
             "3  松开右键退出自定义状态",
         ):
             tk.Label(
@@ -417,7 +403,7 @@ class MouseGestureApp:
         ).pack(anchor="w")
         tk.Label(
             title_box,
-            text="仅在按住右键期间识别滚轮和侧键组合",
+            text="右键保持时执行动作，普通侧键保留浏览器功能",
             bg=COLORS["page"],
             fg=COLORS["muted"],
             font=("Microsoft YaHei UI", 9),
@@ -464,26 +450,24 @@ class MouseGestureApp:
             (
                 "xbutton1",
                 "侧键截图",
-                "右键按住 + XButton1",
-                "调用系统截图工具（Win+Shift+S）",
+                "右键按住 + 任一侧键",
+                "调用 Win+Shift+S；未按右键时正常前进/后退",
                 COLORS["orange"],
-            ),
-            (
-                "wheel_combo",
-                "滚轮组合截图",
-                "右键按住 + 上滚→下滚",
-                "在时间窗口内完成组合才调用系统截图",
-                COLORS["red"],
             ),
         )
         for index, spec in enumerate(card_specs):
             card = GestureCard(cards, *spec)
-            row, column = divmod(index, 2)
+            row, column = (0, index) if index < 2 else (1, 0)
             card.grid(
                 row=row,
                 column=column,
                 sticky="nsew",
-                padx=(0 if column == 0 else 7, 7 if column == 0 else 0),
+                columnspan=2 if index == 2 else 1,
+                padx=(
+                    (0, 0)
+                    if index == 2
+                    else (0, 7) if column == 0 else (7, 0)
+                ),
                 pady=(0 if row == 0 else 7, 7 if row == 0 else 0),
             )
 
@@ -648,49 +632,24 @@ class MouseGestureApp:
         settings_panel.pack(fill="x", padx=22, pady=(10, 8))
         tk.Label(
             settings_panel,
-            text="组合设置",
+            text="启动设置",
             bg=COLORS["card"],
             fg=COLORS["text"],
             font=("Microsoft YaHei UI", 11, "bold"),
         ).grid(row=0, column=0, sticky="w", padx=(0, 18))
-
-        tk.Label(
-            settings_panel,
-            text="上→下截图窗口(ms)",
-            bg=COLORS["card"],
-            fg=COLORS["muted"],
-        ).grid(row=0, column=1, sticky="e", padx=(0, 6))
-        interval = ttk.Spinbox(
-            settings_panel,
-            from_=200,
-            to=300,
-            increment=10,
-            textvariable=self.interval_var,
-            width=7,
-            style="App.TSpinbox",
-        )
-        interval.grid(row=0, column=2, sticky="w")
-
-        tk.Label(
-            settings_panel,
-            text="滚轮较松时建议调低，默认 250ms",
-            bg=COLORS["card"],
-            fg=COLORS["orange"],
-            font=("Microsoft YaHei UI", 8),
-        ).grid(row=0, column=3, sticky="w", padx=(12, 4))
 
         ttk.Checkbutton(
             settings_panel,
             text="启动后自动监听",
             variable=self.launch_var,
             style="App.TCheckbutton",
-        ).grid(row=0, column=4, padx=(18, 8))
+        ).grid(row=0, column=1, padx=(18, 8))
         ttk.Checkbutton(
             settings_panel,
             text="启动时最小化",
             variable=self.minimize_var,
             style="App.TCheckbutton",
-        ).grid(row=0, column=5, padx=(0, 10))
+        ).grid(row=0, column=2, padx=(0, 10))
 
         save_button = tk.Button(
             settings_panel,
@@ -707,8 +666,8 @@ class MouseGestureApp:
             pady=7,
             font=("Microsoft YaHei UI", 9, "bold"),
         )
-        save_button.grid(row=0, column=6, sticky="e")
-        settings_panel.columnconfigure(6, weight=1)
+        save_button.grid(row=0, column=3, sticky="e")
+        settings_panel.columnconfigure(3, weight=1)
         self._build_encouragement(page)
 
     def _build_quick_tools(self, page: tk.Frame) -> None:
@@ -939,7 +898,8 @@ class MouseGestureApp:
         self.hook.set_enabled(self.listening)
         self._refresh_listening_state()
         self._append_log(
-            "程序已就绪，仅在按住右键时识别滚轮和 XButton1",
+            "程序已就绪；右键保持时识别滚轮和侧键，"
+            "普通侧键保持浏览器前进/后退",
             "muted",
         )
         if self.settings.minimize_on_start:
@@ -1106,16 +1066,7 @@ class MouseGestureApp:
         self.encouragement_var.set(random.choice(choices or ENCOURAGEMENTS))
 
     def save_settings(self) -> None:
-        try:
-            interval = int(self.interval_var.get())
-            if not 200 <= interval <= 300:
-                raise ValueError("上→下截图窗口必须在 200-300 毫秒之间")
-        except (ValueError, tk.TclError) as exc:
-            messagebox.showwarning("设置未保存", str(exc))
-            return
-
         self.settings = AppSettings(
-            screenshot_combo_interval_ms=interval,
             launch_listening=self.launch_var.get(),
             minimize_on_start=self.minimize_var.get(),
             custom_button_1_name=self.settings.custom_button_1_name,
@@ -1129,7 +1080,6 @@ class MouseGestureApp:
             messagebox.showerror("保存失败", str(exc))
             return
 
-        self.hook.set_combo_interval_ms(interval)
         self._append_log("设置已保存并立即生效", "success")
         self._show_toast("设置已保存", COLORS["green"])
 
@@ -1174,7 +1124,7 @@ class MouseGestureApp:
         trigger_text = {
             HeldMouseAction.COPY: "右键 + 滚轮上滚",
             HeldMouseAction.ENHANCED_PASTE: "右键 + 滚轮下滚",
-            HeldMouseAction.SCREENSHOT: "右键截图组合",
+            HeldMouseAction.SCREENSHOT: "右键 + 鼠标侧键",
         }[action]
         text = f"{trigger_text}  ·  {action_result.message}"
         if action_result.detail:

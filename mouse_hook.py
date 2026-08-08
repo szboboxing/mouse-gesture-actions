@@ -21,14 +21,12 @@ WM_XBUTTONDOWN = 0x020B
 WM_XBUTTONUP = 0x020C
 WM_QUIT = 0x0012
 XBUTTON1 = 0x0001
+XBUTTON2 = 0x0002
+VK_RBUTTON = 0x02
 LLMHF_INJECTED = 0x00000001
 MOUSEEVENTF_RIGHTDOWN = 0x0008
 MOUSEEVENTF_RIGHTUP = 0x0010
 HC_ACTION = 0
-
-MIN_COMBO_INTERVAL_MS = 200
-MAX_COMBO_INTERVAL_MS = 300
-DEFAULT_COMBO_INTERVAL_MS = 250
 
 LRESULT = ctypes.c_ssize_t
 ULONG_PTR = wintypes.WPARAM
@@ -58,91 +56,47 @@ class HeldMouseAction(str, Enum):
 @dataclass(frozen=True, slots=True)
 class StateDecision:
     action: HeldMouseAction | None = None
-    schedule_copy: bool = False
     replay_right_click: bool = False
 
 
 class RightHoldGestureState:
-    """Pure state machine for gestures performed while right is held."""
+    """Pure state machine for actions performed while right is held."""
 
-    def __init__(
-        self,
-        combo_interval_ms: int = DEFAULT_COMBO_INTERVAL_MS,
-    ) -> None:
+    def __init__(self) -> None:
         self._active = False
         self._action_committed = False
-        self._pending_scroll_up_at: float | None = None
-        self.update_combo_interval(combo_interval_ms)
 
     @property
     def active(self) -> bool:
         return self._active
 
-    @property
-    def pending_copy(self) -> bool:
-        return self._pending_scroll_up_at is not None
-
-    def update_combo_interval(self, interval_ms: int) -> None:
-        interval_ms = int(interval_ms)
-        if not MIN_COMBO_INTERVAL_MS <= interval_ms <= MAX_COMBO_INTERVAL_MS:
-            raise ValueError(
-                "截图组合窗口必须在 "
-                f"{MIN_COMBO_INTERVAL_MS}-{MAX_COMBO_INTERVAL_MS} 毫秒之间"
-            )
-        self.combo_interval = interval_ms / 1000.0
-
     def press_right(self) -> None:
         self._active = True
         self._action_committed = False
-        self._pending_scroll_up_at = None
 
-    def scroll_up(self, timestamp: float) -> StateDecision:
+    def scroll_up(self) -> StateDecision:
         if not self._active or self._action_committed:
             return StateDecision()
-        self._pending_scroll_up_at = timestamp
-        return StateDecision(schedule_copy=True)
-
-    def scroll_down(self, timestamp: float) -> StateDecision:
-        if not self._active or self._action_committed:
-            return StateDecision()
-
-        pending_at = self._pending_scroll_up_at
-        self._pending_scroll_up_at = None
-        self._action_committed = True
-        if pending_at is not None:
-            elapsed = timestamp - pending_at
-            if 0.0 <= elapsed <= self.combo_interval:
-                return StateDecision(action=HeldMouseAction.SCREENSHOT)
-            return StateDecision(action=HeldMouseAction.COPY)
-        return StateDecision(action=HeldMouseAction.ENHANCED_PASTE)
-
-    def press_xbutton1(self) -> StateDecision:
-        if not self._active or self._action_committed:
-            return StateDecision()
-        self._pending_scroll_up_at = None
-        self._action_committed = True
-        return StateDecision(action=HeldMouseAction.SCREENSHOT)
-
-    def copy_timeout(self, timestamp: float) -> StateDecision:
-        pending_at = self._pending_scroll_up_at
-        if (
-            not self._active
-            or self._action_committed
-            or pending_at is None
-            or timestamp - pending_at < self.combo_interval
-        ):
-            return StateDecision()
-        self._pending_scroll_up_at = None
         self._action_committed = True
         return StateDecision(action=HeldMouseAction.COPY)
+
+    def scroll_down(self) -> StateDecision:
+        if not self._active or self._action_committed:
+            return StateDecision()
+        self._action_committed = True
+        return StateDecision(action=HeldMouseAction.ENHANCED_PASTE)
+
+    def press_side_button(self) -> StateDecision:
+        if not self._active or self._action_committed:
+            return StateDecision()
+        self._action_committed = True
+        return StateDecision(action=HeldMouseAction.SCREENSHOT)
 
     def release_right(self) -> StateDecision:
         if not self._active:
             return StateDecision()
 
-        if not self._action_committed and self._pending_scroll_up_at is not None:
-            decision = StateDecision(action=HeldMouseAction.COPY)
-        elif not self._action_committed:
+        if not self._action_committed:
             decision = StateDecision(replay_right_click=True)
         else:
             decision = StateDecision()
@@ -152,7 +106,6 @@ class RightHoldGestureState:
     def cancel(self) -> None:
         self._active = False
         self._action_committed = False
-        self._pending_scroll_up_at = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -212,15 +165,13 @@ class GlobalRightButtonActionHook:
     def __init__(
         self,
         on_action: Callable[[HeldMouseAction], None],
-        combo_interval_ms: int = DEFAULT_COMBO_INTERVAL_MS,
     ) -> None:
         self._on_action = on_action
         self._enabled = True
         self._lock = threading.Lock()
-        self._state = RightHoldGestureState(combo_interval_ms)
+        self._state = RightHoldGestureState()
         self._metrics = MouseMetricsTracker()
-        self._pending_copy_timer: threading.Timer | None = None
-        self._swallow_xbutton1_up = False
+        self._suppressed_xbuttons: set[int] = set()
         self._hook = None
         self._hook_thread: threading.Thread | None = None
         self._dispatch_thread: threading.Thread | None = None
@@ -248,14 +199,7 @@ class GlobalRightButtonActionHook:
             self._enabled = enabled
             if not enabled:
                 self._state.cancel()
-                self._cancel_pending_copy_locked()
-                self._swallow_xbutton1_up = False
-
-    def set_combo_interval_ms(self, interval_ms: int) -> None:
-        with self._lock:
-            self._state.update_combo_interval(interval_ms)
-            if self._state.pending_copy:
-                self._schedule_pending_copy_locked()
+                self._suppressed_xbuttons.clear()
 
     def snapshot_metrics(self) -> MouseMetrics:
         return self._metrics.snapshot()
@@ -318,6 +262,8 @@ class GlobalRightButtonActionHook:
             wintypes.LPARAM,
         )
         self._user32.CallNextHookEx.restype = LRESULT
+        self._user32.GetAsyncKeyState.argtypes = (ctypes.c_int,)
+        self._user32.GetAsyncKeyState.restype = wintypes.SHORT
         self._user32.UnhookWindowsHookEx.argtypes = (wintypes.HHOOK,)
         self._user32.UnhookWindowsHookEx.restype = wintypes.BOOL
         self._user32.GetMessageW.argtypes = (
@@ -398,39 +344,32 @@ class GlobalRightButtonActionHook:
 
                 if message == WM_RBUTTONDOWN:
                     self._state.press_right()
-                    self._cancel_pending_copy_locked()
                     consume = True
                 elif message == WM_MOUSEWHEEL and self._state.active:
                     delta = _signed_high_word(data.mouseData)
                     if delta > 0:
-                        decision = self._state.scroll_up(now)
-                        if decision.schedule_copy:
-                            self._schedule_pending_copy_locked()
+                        action = self._state.scroll_up().action
                     elif delta < 0:
-                        decision = self._state.scroll_down(now)
-                        self._cancel_pending_copy_locked()
-                        action = decision.action
+                        action = self._state.scroll_down().action
                     consume = delta != 0
-                elif (
-                    message == WM_XBUTTONDOWN
-                    and self._state.active
-                    and _high_word(data.mouseData) == XBUTTON1
-                ):
-                    decision = self._state.press_xbutton1()
-                    self._cancel_pending_copy_locked()
-                    self._swallow_xbutton1_up = True
-                    action = decision.action
-                    consume = True
-                elif (
-                    message == WM_XBUTTONUP
-                    and _high_word(data.mouseData) == XBUTTON1
-                    and self._swallow_xbutton1_up
-                ):
-                    self._swallow_xbutton1_up = False
-                    consume = True
+                elif message == WM_XBUTTONDOWN:
+                    xbutton = _high_word(data.mouseData)
+                    if xbutton in (XBUTTON1, XBUTTON2):
+                        if self._state.active and self._is_right_button_down():
+                            action = self._state.press_side_button().action
+                            self._suppressed_xbuttons.add(xbutton)
+                            consume = True
+                        else:
+                            self._suppressed_xbuttons.discard(xbutton)
+                            if self._state.active:
+                                self._state.cancel()
+                elif message == WM_XBUTTONUP:
+                    xbutton = _high_word(data.mouseData)
+                    if xbutton in self._suppressed_xbuttons:
+                        self._suppressed_xbuttons.remove(xbutton)
+                        consume = True
                 elif message == WM_RBUTTONUP and self._state.active:
                     decision = self._state.release_right()
-                    self._cancel_pending_copy_locked()
                     action = decision.action
                     replay_right_click = decision.replay_right_click
                     consume = True
@@ -444,33 +383,12 @@ class GlobalRightButtonActionHook:
         except Exception:
             with self._lock:
                 self._state.cancel()
-                self._cancel_pending_copy_locked()
+                self._suppressed_xbuttons.clear()
 
         return self._call_next(code, message, data_pointer)
 
-    def _schedule_pending_copy_locked(self) -> None:
-        self._cancel_pending_copy_locked()
-        timer = threading.Timer(
-            self._state.combo_interval,
-            self._complete_pending_copy,
-        )
-        timer.daemon = True
-        self._pending_copy_timer = timer
-        timer.start()
-
-    def _cancel_pending_copy_locked(self) -> None:
-        if self._pending_copy_timer is not None:
-            self._pending_copy_timer.cancel()
-            self._pending_copy_timer = None
-
-    def _complete_pending_copy(self) -> None:
-        action: HeldMouseAction | None = None
-        with self._lock:
-            self._pending_copy_timer = None
-            if self._enabled:
-                action = self._state.copy_timeout(time.perf_counter()).action
-        if action is not None:
-            self._action_queue.put(action)
+    def _is_right_button_down(self) -> bool:
+        return bool(self._user32.GetAsyncKeyState(VK_RBUTTON) & 0x8000)
 
     def _call_next(self, code: int, message: int, data_pointer: int) -> int:
         return int(
