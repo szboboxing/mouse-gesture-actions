@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import unittest
 
-from settings import AppSettings
+from settings import (
+    AppSettings,
+    KeyboardMappingSettings,
+)
 
 
 class SettingsTests(unittest.TestCase):
@@ -62,6 +65,108 @@ class SettingsTests(unittest.TestCase):
                     settings.screenshot_side_buttons,
                     ("xbutton1", "xbutton2"),
                 )
+
+    def test_keyboard_mappings_have_compatible_defaults(self) -> None:
+        settings = AppSettings.from_mapping({})
+
+        self.assertEqual(
+            settings.keyboard_mappings,
+            (
+                KeyboardMappingSettings(
+                    "xbutton1", ("ctrl",), "C", False
+                ),
+                KeyboardMappingSettings(
+                    "xbutton2", ("ctrl",), "V", False
+                ),
+            ),
+        )
+
+    def test_keyboard_mapping_values_are_normalized(self) -> None:
+        settings = AppSettings.from_mapping(
+            {
+                "keyboard_mappings": [
+                    {
+                        "mouse_button": "XBUTTON2",
+                        "modifiers": [
+                            "shift",
+                            "CTRL",
+                            "unsupported",
+                            "alt",
+                        ],
+                        "key": "a",
+                        "enabled": True,
+                    },
+                    {
+                        "mouse_button": "xbutton1",
+                        "modifiers": [],
+                        "key": "z",
+                        "enabled": True,
+                    },
+                ]
+            }
+        )
+
+        self.assertEqual(
+            settings.keyboard_mappings,
+            (
+                KeyboardMappingSettings(
+                    "xbutton2",
+                    ("ctrl", "alt", "shift"),
+                    "A",
+                    True,
+                ),
+                KeyboardMappingSettings(
+                    "xbutton1",
+                    (),
+                    "Z",
+                    True,
+                ),
+            ),
+        )
+
+    def test_invalid_keyboard_mapping_values_use_defaults(self) -> None:
+        settings = AppSettings.from_mapping(
+            {
+                "keyboard_mappings": [
+                    {
+                        "mouse_button": "middle",
+                        "modifiers": "ctrl",
+                        "key": "F1",
+                        "enabled": "yes",
+                    }
+                ]
+            }
+        )
+
+        self.assertEqual(
+            settings.keyboard_mappings[0],
+            KeyboardMappingSettings(
+                "xbutton1", ("ctrl",), "C", False
+            ),
+        )
+
+    def test_only_one_mapping_can_enable_the_same_side_button(self) -> None:
+        settings = AppSettings.from_mapping(
+            {
+                "keyboard_mappings": [
+                    {
+                        "mouse_button": "xbutton1",
+                        "modifiers": ["ctrl"],
+                        "key": "c",
+                        "enabled": True,
+                    },
+                    {
+                        "mouse_button": "xbutton1",
+                        "modifiers": ["ctrl"],
+                        "key": "v",
+                        "enabled": True,
+                    },
+                ]
+            }
+        )
+
+        self.assertTrue(settings.keyboard_mappings[0].enabled)
+        self.assertFalse(settings.keyboard_mappings[1].enabled)
 
 
 if __name__ == "__main__":

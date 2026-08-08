@@ -72,6 +72,11 @@ class MouseTestEvent:
 
 
 @dataclass(frozen=True, slots=True)
+class KeyboardMappingAction:
+    mapping_index: int
+
+
+@dataclass(frozen=True, slots=True)
 class StateDecision:
     action: HeldMouseAction | None = None
     replay_right_click: bool = False
@@ -182,7 +187,10 @@ class GlobalRightButtonActionHook:
 
     def __init__(
         self,
-        on_action: Callable[[HeldMouseAction], None],
+        on_action: Callable[
+            [HeldMouseAction | KeyboardMappingAction],
+            None,
+        ],
         on_test_event: Callable[[MouseTestEvent], None] | None = None,
     ) -> None:
         self._on_action = on_action
@@ -193,13 +201,16 @@ class GlobalRightButtonActionHook:
         self._state = RightHoldGestureState()
         self._metrics = MouseMetricsTracker()
         self._screenshot_xbuttons = {XBUTTON1, XBUTTON2}
+        self._keyboard_mappings: dict[int, int] = {}
         self._suppressed_xbuttons: set[int] = set()
         self._right_button_down = False
         self._hook = None
         self._hook_thread: threading.Thread | None = None
         self._dispatch_thread: threading.Thread | None = None
         self._hook_thread_id = 0
-        self._action_queue: queue.Queue[HeldMouseAction | None] = queue.Queue()
+        self._action_queue: queue.Queue[
+            HeldMouseAction | KeyboardMappingAction | None
+        ] = queue.Queue()
         self._callback = LowLevelMouseProc(self._mouse_proc)
         self._started = threading.Event()
         self._start_error: str | None = None
@@ -251,6 +262,24 @@ class GlobalRightButtonActionHook:
             self._state.cancel()
             self._suppressed_xbuttons.clear()
             self._right_button_down = False
+
+    def set_keyboard_mappings(
+        self,
+        mappings: Iterable[tuple[str | MouseControl, int]],
+    ) -> None:
+        xbuttons = {
+            MouseControl.XBUTTON1.value: XBUTTON1,
+            MouseControl.XBUTTON2.value: XBUTTON2,
+        }
+        configured: dict[int, int] = {}
+        for control, mapping_index in mappings:
+            value = getattr(control, "value", control)
+            xbutton = xbuttons.get(value)
+            if xbutton is not None:
+                configured[xbutton] = int(mapping_index)
+        with self._lock:
+            self._keyboard_mappings = configured
+            self._suppressed_xbuttons.clear()
 
     def snapshot_metrics(self) -> MouseMetrics:
         return self._metrics.snapshot()
@@ -400,7 +429,7 @@ class GlobalRightButtonActionHook:
                     self._on_test_event(test_event)
                 return self._call_next(code, message, data_pointer)
 
-            action: HeldMouseAction | None = None
+            action: HeldMouseAction | KeyboardMappingAction | None = None
             replay_right_click = False
             consume = False
             with self._lock:
@@ -430,10 +459,21 @@ class GlobalRightButtonActionHook:
                             action = self._state.press_side_button().action
                             self._suppressed_xbuttons.add(xbutton)
                             consume = True
+                        elif xbutton in self._suppressed_xbuttons:
+                            consume = True
                         else:
-                            self._suppressed_xbuttons.discard(xbutton)
                             if self._state.active and not right_button_down:
                                 self._state.cancel()
+                            mapping_index = self._keyboard_mappings.get(
+                                xbutton
+                            )
+                            if (
+                                mapping_index is not None
+                                and not right_button_down
+                            ):
+                                action = KeyboardMappingAction(mapping_index)
+                                self._suppressed_xbuttons.add(xbutton)
+                                consume = True
                 elif message == WM_XBUTTONUP:
                     xbutton = _high_word(data.mouseData)
                     if xbutton in self._suppressed_xbuttons:

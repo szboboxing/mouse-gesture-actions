@@ -18,10 +18,16 @@ from actions import ActionResult, SystemActions
 from mouse_hook import (
     GlobalRightButtonActionHook,
     HeldMouseAction,
+    KeyboardMappingAction,
     MouseControl,
     MouseTestEvent,
 )
-from settings import AppSettings, load_settings
+from settings import (
+    KEYBOARD_MAPPING_KEYS,
+    AppSettings,
+    KeyboardMappingSettings,
+    load_settings,
+)
 from version import APP_NAME, VERSION_TAG
 
 
@@ -91,6 +97,7 @@ USAGE_LABELS = (
     ("media", "媒体播放器"),
     ("brightness", "亮度调节"),
     ("contrast", "对比度调节"),
+    ("keyboard_mapping", "键盘映射"),
     ("custom", "自定义功能"),
 )
 
@@ -111,6 +118,18 @@ SIDE_BUTTON_NAMES = {
     MouseControl.XBUTTON1: "上一页侧键",
     MouseControl.XBUTTON2: "下一页侧键",
 }
+KEYBOARD_MAPPING_MOUSE_LABELS = {
+    "xbutton1": "X1 / 上一页侧键",
+    "xbutton2": "X2 / 下一页侧键",
+}
+KEYBOARD_MAPPING_MOUSE_VALUES = {
+    label: value for value, label in KEYBOARD_MAPPING_MOUSE_LABELS.items()
+}
+KEYBOARD_MAPPING_MODIFIER_LABELS = {
+    "ctrl": "Ctrl",
+    "alt": "Alt",
+    "shift": "Shift",
+}
 
 
 def _side_button_config_text(side_buttons: tuple[str, ...]) -> str:
@@ -120,6 +139,15 @@ def _side_button_config_text(side_buttons: tuple[str, ...]) -> str:
         if control.value in side_buttons
     ]
     return f"已保存截图侧键：{'、'.join(names)}"
+
+
+def _keyboard_shortcut_text(mapping: KeyboardMappingSettings) -> str:
+    parts = [
+        KEYBOARD_MAPPING_MODIFIER_LABELS[modifier]
+        for modifier in mapping.modifiers
+    ]
+    parts.append(mapping.key)
+    return "+".join(parts)
 
 
 class GestureCard(tk.Frame):
@@ -138,7 +166,7 @@ class GestureCard(tk.Frame):
             highlightbackground=COLORS["line"],
             highlightthickness=1,
             padx=16,
-            pady=14,
+            pady=10,
         )
         self.columnconfigure(1, weight=1)
 
@@ -179,7 +207,7 @@ class GestureCard(tk.Frame):
             bg=COLORS["card"],
             fg=COLORS["muted"],
             font=("Microsoft YaHei UI", 8),
-        ).grid(row=2, column=0, columnspan=2, sticky="w", pady=(14, 5))
+        ).grid(row=2, column=0, columnspan=2, sticky="w", pady=(9, 4))
 
         tk.Label(
             self,
@@ -188,7 +216,7 @@ class GestureCard(tk.Frame):
             fg=COLORS["text"],
             font=("Microsoft YaHei UI", 9, "bold"),
             padx=10,
-            pady=7,
+            pady=5,
             anchor="w",
             justify="left",
             wraplength=270,
@@ -240,11 +268,20 @@ class MouseGestureApp:
         self.actions = SystemActions()
         self.ui_events: queue.Queue[tuple[str, object]] = queue.Queue()
         self.hook = GlobalRightButtonActionHook(
-            self._on_held_action,
+            self._on_hook_action,
             self._on_mouse_test_event,
         )
         self.hook.set_screenshot_side_buttons(
             self.settings.screenshot_side_buttons
+        )
+        self.hook.set_keyboard_mappings(
+            (
+                (mapping.mouse_button, index)
+                for index, mapping in enumerate(
+                    self.settings.keyboard_mappings
+                )
+                if mapping.enabled
+            )
         )
         self.usage_counts: Counter[str] = Counter()
         self.mouse_test_counts: Counter[MouseControl] = Counter()
@@ -301,6 +338,35 @@ class MouseGestureApp:
             )
             for index, name_var in enumerate(self.custom_name_vars)
         )
+        self.keyboard_mapping_mouse_vars = tuple(
+            tk.StringVar(
+                value=KEYBOARD_MAPPING_MOUSE_LABELS[
+                    mapping.mouse_button
+                ]
+            )
+            for mapping in self.settings.keyboard_mappings
+        )
+        self.keyboard_mapping_key_vars = tuple(
+            tk.StringVar(value=mapping.key)
+            for mapping in self.settings.keyboard_mappings
+        )
+        self.keyboard_mapping_modifier_vars = tuple(
+            {
+                modifier: tk.BooleanVar(
+                    value=modifier in mapping.modifiers
+                )
+                for modifier in KEYBOARD_MAPPING_MODIFIER_LABELS
+            }
+            for mapping in self.settings.keyboard_mappings
+        )
+        self.keyboard_mapping_enabled_vars = tuple(
+            tk.BooleanVar(value=mapping.enabled)
+            for mapping in self.settings.keyboard_mappings
+        )
+        self.keyboard_mapping_preview_vars = tuple(
+            tk.StringVar() for _mapping in self.settings.keyboard_mappings
+        )
+        self.keyboard_mapping_buttons: list[tk.Button] = []
         self.encouragement_var = tk.StringVar()
 
         self._configure_window()
@@ -365,6 +431,20 @@ class MouseGestureApp:
             indicatorcolor=[
                 ("selected", COLORS["blue"]),
                 ("!selected", COLORS["card"]),
+            ],
+        )
+        style.configure(
+            "Mapping.TCheckbutton",
+            background=COLORS["page"],
+            foreground=COLORS["text"],
+            font=("Microsoft YaHei UI", 8),
+        )
+        style.map(
+            "Mapping.TCheckbutton",
+            background=[("active", COLORS["page"])],
+            indicatorcolor=[
+                ("selected", COLORS["blue"]),
+                ("!selected", COLORS["page"]),
             ],
         )
 
@@ -566,7 +646,7 @@ class MouseGestureApp:
 
     def _build_page(self, page: tk.Frame) -> None:
         header = tk.Frame(page, bg=COLORS["page"])
-        header.pack(fill="x", padx=22, pady=(18, 12))
+        header.pack(fill="x", padx=22, pady=(12, 8))
         title_box = tk.Frame(header, bg=COLORS["page"])
         title_box.pack(side="left")
         tk.Label(
@@ -578,7 +658,7 @@ class MouseGestureApp:
         ).pack(anchor="w")
         tk.Label(
             title_box,
-            text="右键保持时执行动作，普通侧键保留浏览器功能",
+            text="右键保持时执行动作，普通侧键可映射自定义快捷键",
             bg=COLORS["page"],
             fg=COLORS["muted"],
             font=("Microsoft YaHei UI", 9),
@@ -626,7 +706,7 @@ class MouseGestureApp:
                 "xbutton1",
                 "侧键截图",
                 "右键按住 + 已确认侧键",
-                "测试页可重新确认保存；普通侧键保持前进/后退",
+                "测试页可重新确认；未启动映射时保留前进/后退",
                 COLORS["orange"],
             ),
         )
@@ -794,6 +874,7 @@ class MouseGestureApp:
                 font=("Segoe UI", 8, "bold"),
             ).pack(side="right")
 
+        self._build_keyboard_mappings(page)
         self._build_quick_tools(page)
 
         settings_panel = tk.Frame(
@@ -804,7 +885,7 @@ class MouseGestureApp:
             padx=18,
             pady=10,
         )
-        settings_panel.pack(fill="x", padx=22, pady=(10, 8))
+        settings_panel.pack(fill="x", padx=22, pady=(8, 6))
         tk.Label(
             settings_panel,
             text="启动设置",
@@ -1261,6 +1342,140 @@ class MouseGestureApp:
             (item_id, idle_color, active_color)
         )
 
+    def _build_keyboard_mappings(self, page: tk.Frame) -> None:
+        panel = tk.Frame(
+            page,
+            bg=COLORS["card"],
+            highlightbackground=COLORS["line"],
+            highlightthickness=1,
+            padx=12,
+            pady=6,
+        )
+        panel.pack(fill="x", padx=22, pady=(6, 0))
+
+        heading = tk.Frame(panel, bg=COLORS["card"])
+        heading.pack(fill="x")
+        tk.Label(
+            heading,
+            text="自定义键盘映射键",
+            bg=COLORS["card"],
+            fg=COLORS["text"],
+            font=("Microsoft YaHei UI", 10, "bold"),
+        ).pack(side="left")
+        tk.Label(
+            heading,
+            text="普通侧键执行映射；右键保持截图和测试页优先",
+            bg=COLORS["card"],
+            fg=COLORS["muted"],
+            font=("Microsoft YaHei UI", 8),
+        ).pack(side="right")
+
+        mappings = tk.Frame(panel, bg=COLORS["card"])
+        mappings.pack(fill="x", pady=(4, 0))
+        for column in range(2):
+            mappings.columnconfigure(column, weight=1, uniform="mapping")
+
+        for index in range(2):
+            card = tk.Frame(
+                mappings,
+                bg=COLORS["page"],
+                highlightbackground=COLORS["line"],
+                highlightthickness=1,
+                padx=10,
+                pady=4,
+            )
+            card.grid(
+                row=0,
+                column=index,
+                sticky="ew",
+                padx=(0, 5) if index == 0 else (5, 0),
+            )
+
+            summary = tk.Frame(card, bg=COLORS["page"])
+            summary.pack(fill="x", pady=(0, 3))
+            tk.Label(
+                summary,
+                text=f"映射 {index + 1}",
+                bg=COLORS["page"],
+                fg=COLORS["text"],
+                font=("Microsoft YaHei UI", 9, "bold"),
+            ).pack(side="left")
+            tk.Label(
+                summary,
+                textvariable=self.keyboard_mapping_preview_vars[index],
+                bg=COLORS["page"],
+                fg=COLORS["muted"],
+                font=("Microsoft YaHei UI", 8),
+            ).pack(side="right")
+
+            controls = tk.Frame(card, bg=COLORS["page"])
+            controls.pack(fill="x")
+            mouse_box = ttk.Combobox(
+                controls,
+                textvariable=self.keyboard_mapping_mouse_vars[index],
+                values=tuple(KEYBOARD_MAPPING_MOUSE_VALUES),
+                state="readonly",
+                width=16,
+                style="App.TCombobox",
+            )
+            mouse_box.pack(side="left", padx=(0, 7))
+            mouse_box.bind(
+                "<<ComboboxSelected>>",
+                lambda _event, target=index: (
+                    self._on_keyboard_mapping_changed(target)
+                ),
+            )
+
+            for modifier, label in KEYBOARD_MAPPING_MODIFIER_LABELS.items():
+                ttk.Checkbutton(
+                    controls,
+                    text=label,
+                    variable=self.keyboard_mapping_modifier_vars[index][
+                        modifier
+                    ],
+                    command=lambda target=index: (
+                        self._on_keyboard_mapping_changed(target)
+                    ),
+                    style="Mapping.TCheckbutton",
+                ).pack(side="left", padx=(0, 3))
+
+            key_box = ttk.Combobox(
+                controls,
+                textvariable=self.keyboard_mapping_key_vars[index],
+                values=KEYBOARD_MAPPING_KEYS,
+                state="readonly",
+                width=3,
+                style="App.TCombobox",
+            )
+            key_box.pack(side="left", padx=(4, 7))
+            key_box.bind(
+                "<<ComboboxSelected>>",
+                lambda _event, target=index: (
+                    self._on_keyboard_mapping_changed(target)
+                ),
+            )
+
+            button = tk.Button(
+                controls,
+                text="启动",
+                command=lambda target=index: (
+                    self._toggle_keyboard_mapping(target)
+                ),
+                bg=COLORS["blue"],
+                fg="#FFFFFF",
+                activebackground="#405ED9",
+                activeforeground="#FFFFFF",
+                relief="flat",
+                bd=0,
+                cursor="hand2",
+                padx=13,
+                pady=3,
+                font=("Microsoft YaHei UI", 8, "bold"),
+            )
+            button.pack(side="right")
+            self.keyboard_mapping_buttons.append(button)
+            self._refresh_keyboard_mapping_ui(index)
+
     def _build_quick_tools(self, page: tk.Frame) -> None:
         panel = tk.Frame(
             page,
@@ -1270,7 +1485,7 @@ class MouseGestureApp:
             padx=12,
             pady=9,
         )
-        panel.pack(fill="x", padx=22, pady=(10, 0))
+        panel.pack(fill="x", padx=22, pady=(6, 0))
         tk.Label(
             panel,
             text="快捷工具",
@@ -1552,12 +1767,17 @@ class MouseGestureApp:
             )
             return
 
-        self.listening = bool(self.settings.launch_listening)
+        mapping_enabled = any(
+            mapping.enabled for mapping in self.settings.keyboard_mappings
+        )
+        self.listening = bool(
+            self.settings.launch_listening or mapping_enabled
+        )
         self.hook.set_enabled(self.listening)
         self._refresh_listening_state()
         self._append_log(
-            "程序已就绪；右键保持时识别滚轮和侧键，"
-            "普通侧键保持浏览器前进/后退",
+            "程序已就绪；右键保持时识别滚轮和截图侧键，"
+            "已启动的普通侧键映射优先于浏览器前进/后退",
             "muted",
         )
         if self.settings.minimize_on_start:
@@ -1739,6 +1959,189 @@ class MouseGestureApp:
         ]
         self.encouragement_var.set(random.choice(choices or ENCOURAGEMENTS))
 
+    def _collect_keyboard_mappings(
+        self,
+    ) -> tuple[KeyboardMappingSettings, ...]:
+        mappings: list[KeyboardMappingSettings] = []
+        for index, current in enumerate(self.settings.keyboard_mappings):
+            mouse_button = KEYBOARD_MAPPING_MOUSE_VALUES.get(
+                self.keyboard_mapping_mouse_vars[index].get(),
+                current.mouse_button,
+            )
+            modifiers = tuple(
+                modifier
+                for modifier in KEYBOARD_MAPPING_MODIFIER_LABELS
+                if self.keyboard_mapping_modifier_vars[index][
+                    modifier
+                ].get()
+            )
+            key = self.keyboard_mapping_key_vars[index].get().upper()
+            if key not in KEYBOARD_MAPPING_KEYS:
+                key = current.key
+            mappings.append(
+                KeyboardMappingSettings(
+                    mouse_button=mouse_button,
+                    modifiers=modifiers,
+                    key=key,
+                    enabled=self.keyboard_mapping_enabled_vars[
+                        index
+                    ].get(),
+                )
+            )
+        return tuple(mappings)
+
+    def _sync_keyboard_mapping_vars(
+        self,
+        mappings: tuple[KeyboardMappingSettings, ...],
+    ) -> None:
+        for index, mapping in enumerate(mappings):
+            self.keyboard_mapping_mouse_vars[index].set(
+                KEYBOARD_MAPPING_MOUSE_LABELS[mapping.mouse_button]
+            )
+            self.keyboard_mapping_key_vars[index].set(mapping.key)
+            for modifier, variable in (
+                self.keyboard_mapping_modifier_vars[index].items()
+            ):
+                variable.set(modifier in mapping.modifiers)
+            self.keyboard_mapping_enabled_vars[index].set(
+                mapping.enabled
+            )
+            self._refresh_keyboard_mapping_ui(index)
+
+    def _apply_keyboard_mappings_to_hook(self) -> None:
+        self.hook.set_keyboard_mappings(
+            (
+                (mapping.mouse_button, index)
+                for index, mapping in enumerate(
+                    self.settings.keyboard_mappings
+                )
+                if mapping.enabled
+            )
+        )
+
+    def _persist_keyboard_mappings(
+        self,
+        mappings: tuple[KeyboardMappingSettings, ...],
+    ) -> bool:
+        previous = self.settings.keyboard_mappings
+        self.settings.keyboard_mappings = mappings
+        try:
+            self.settings.save()
+        except OSError as exc:
+            self.settings.keyboard_mappings = previous
+            self._sync_keyboard_mapping_vars(previous)
+            messagebox.showerror(
+                "保存失败",
+                str(exc),
+                parent=self.root,
+            )
+            return False
+
+        self._apply_keyboard_mappings_to_hook()
+        for index in range(len(mappings)):
+            self._refresh_keyboard_mapping_ui(index)
+        return True
+
+    def _disable_conflicting_keyboard_mapping(
+        self,
+        active_index: int,
+    ) -> int | None:
+        if not self.keyboard_mapping_enabled_vars[active_index].get():
+            return None
+        active_mouse = KEYBOARD_MAPPING_MOUSE_VALUES.get(
+            self.keyboard_mapping_mouse_vars[active_index].get()
+        )
+        for index, enabled_var in enumerate(
+            self.keyboard_mapping_enabled_vars
+        ):
+            if index == active_index or not enabled_var.get():
+                continue
+            mouse_button = KEYBOARD_MAPPING_MOUSE_VALUES.get(
+                self.keyboard_mapping_mouse_vars[index].get()
+            )
+            if mouse_button == active_mouse:
+                enabled_var.set(False)
+                return index
+        return None
+
+    def _refresh_keyboard_mapping_ui(self, index: int) -> None:
+        mapping = self._collect_keyboard_mappings()[index]
+        mouse_name = (
+            "X1" if mapping.mouse_button == "xbutton1" else "X2"
+        )
+        state_text = "已启动" if mapping.enabled else "未启动"
+        self.keyboard_mapping_preview_vars[index].set(
+            f"{mouse_name} → {_keyboard_shortcut_text(mapping)} · "
+            f"{state_text}"
+        )
+        if index >= len(self.keyboard_mapping_buttons):
+            return
+        self.keyboard_mapping_buttons[index].configure(
+            text="停用" if mapping.enabled else "启动",
+            bg=COLORS["green"] if mapping.enabled else COLORS["blue"],
+            activebackground=(
+                "#18865E" if mapping.enabled else "#405ED9"
+            ),
+        )
+
+    def _on_keyboard_mapping_changed(self, index: int) -> None:
+        conflict = self._disable_conflicting_keyboard_mapping(index)
+        mappings = self._collect_keyboard_mappings()
+        if not self._persist_keyboard_mappings(mappings):
+            return
+        if conflict is not None:
+            self._append_log(
+                f"映射 {conflict + 1} 已停用："
+                "同一侧键只能启动一组映射",
+                "warning",
+            )
+
+    def _toggle_keyboard_mapping(self, index: int) -> None:
+        enabled_var = self.keyboard_mapping_enabled_vars[index]
+        enabling = not enabled_var.get()
+        if enabling and not self.hook.start():
+            messagebox.showerror(
+                "启动失败",
+                self.hook.start_error or "无法安装全局鼠标监听。",
+                parent=self.root,
+            )
+            return
+
+        enabled_var.set(enabling)
+        conflict = self._disable_conflicting_keyboard_mapping(index)
+        mappings = self._collect_keyboard_mappings()
+        if not self._persist_keyboard_mappings(mappings):
+            return
+
+        mapping = mappings[index]
+        if enabling:
+            self.listening = True
+            self.hook.set_enabled(True)
+            self._refresh_listening_state()
+        if conflict is not None:
+            self._append_log(
+                f"映射 {conflict + 1} 已停用："
+                "同一侧键只能启动一组映射",
+                "warning",
+            )
+
+        shortcut = _keyboard_shortcut_text(mapping)
+        mouse_name = (
+            "X1 / 上一页侧键"
+            if mapping.mouse_button == "xbutton1"
+            else "X2 / 下一页侧键"
+        )
+        state_text = "已启动" if enabling else "已停用"
+        self._append_log(
+            f"映射 {index + 1} {state_text}："
+            f"{mouse_name} → {shortcut}",
+            "success" if enabling else "warning",
+        )
+        self._show_toast(
+            f"键盘映射{state_text}",
+            COLORS["green"] if enabling else COLORS["orange"],
+        )
+
     def save_settings(self) -> None:
         self.settings = AppSettings(
             launch_listening=self.launch_var.get(),
@@ -1748,6 +2151,7 @@ class MouseGestureApp:
             custom_button_1_target=self.settings.custom_button_1_target,
             custom_button_2_name=self.settings.custom_button_2_name,
             custom_button_2_target=self.settings.custom_button_2_target,
+            keyboard_mappings=self._collect_keyboard_mappings(),
         )
         try:
             self.settings.save()
@@ -1755,14 +2159,48 @@ class MouseGestureApp:
             messagebox.showerror("保存失败", str(exc))
             return
 
+        self._apply_keyboard_mappings_to_hook()
         self._append_log("设置已保存并立即生效", "success")
         self._show_toast("设置已保存", COLORS["green"])
+
+    def _on_hook_action(
+        self,
+        action: HeldMouseAction | KeyboardMappingAction,
+    ) -> None:
+        if isinstance(action, KeyboardMappingAction):
+            self._on_keyboard_mapping_action(action)
+            return
+        self._on_held_action(action)
 
     def _on_held_action(self, action: HeldMouseAction) -> None:
         action_result = self._execute_held_action(action)
         event_type = "success" if action_result.success else "error"
         self.ui_events.put(
             ("held_action", (action, action_result, event_type))
+        )
+
+    def _on_keyboard_mapping_action(
+        self,
+        action: KeyboardMappingAction,
+    ) -> None:
+        try:
+            mapping = self.settings.keyboard_mappings[
+                action.mapping_index
+            ]
+        except IndexError:
+            return
+        if not mapping.enabled:
+            return
+        action_result = self.actions.send_custom_shortcut(
+            mapping.modifiers,
+            mapping.key,
+        )
+        event_type = "success" if action_result.success else "error"
+        self.ui_events.put(
+            (
+                "keyboard_mapping",
+                (action.mapping_index, mapping, action_result, event_type),
+            )
         )
 
     def _on_mouse_test_event(self, event: MouseTestEvent) -> None:
@@ -1936,9 +2374,52 @@ class MouseGestureApp:
                     )
                 elif event_name == "mouse_test":
                     self._display_mouse_test_event(payload)
+                elif event_name == "keyboard_mapping":
+                    (
+                        mapping_index,
+                        mapping,
+                        action_result,
+                        event_type,
+                    ) = payload
+                    self._display_keyboard_mapping_action(
+                        mapping_index,
+                        mapping,
+                        action_result,
+                        event_type,
+                    )
         except queue.Empty:
             pass
         self.root.after(60, self._poll_ui_events)
+
+    def _display_keyboard_mapping_action(
+        self,
+        mapping_index: int,
+        mapping: KeyboardMappingSettings,
+        action_result: ActionResult,
+        event_type: str,
+    ) -> None:
+        mouse_name = (
+            "X1 / 上一页侧键"
+            if mapping.mouse_button == "xbutton1"
+            else "X2 / 下一页侧键"
+        )
+        text = (
+            f"映射 {mapping_index + 1}：{mouse_name} → "
+            f"{_keyboard_shortcut_text(mapping)}"
+            f"  ·  {action_result.message}"
+        )
+        if action_result.detail:
+            text += f"\n{action_result.detail}"
+        if action_result.success:
+            self._record_usage("keyboard_mapping")
+
+        self._append_log(text, event_type)
+        self._show_toast(
+            action_result.message,
+            COLORS["green"]
+            if action_result.success
+            else COLORS["red"],
+        )
 
     def _display_held_action(
         self,

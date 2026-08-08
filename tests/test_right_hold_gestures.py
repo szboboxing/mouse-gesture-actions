@@ -23,6 +23,7 @@ from mouse_hook import (
     XBUTTON2,
     GlobalRightButtonActionHook,
     HeldMouseAction,
+    KeyboardMappingAction,
     MouseControl,
     MouseMetricsTracker,
     MouseTestEvent,
@@ -126,6 +127,7 @@ class SideButtonHookTests(unittest.TestCase):
         hook._state = RightHoldGestureState()
         hook._metrics = MouseMetricsTracker()
         hook._screenshot_xbuttons = {XBUTTON1, XBUTTON2}
+        hook._keyboard_mappings = {}
         hook._suppressed_xbuttons = set()
         hook._right_button_down = right_button_down
         hook._action_queue = queue.Queue()
@@ -162,6 +164,54 @@ class SideButtonHookTests(unittest.TestCase):
                 self.assertEqual(hook._call_next.call_count, 2)
                 self.assertTrue(hook._action_queue.empty())
 
+    def test_keyboard_mapping_consumes_side_button_down_and_up(
+        self,
+    ) -> None:
+        hook = self._hook()
+        hook.set_keyboard_mappings((("xbutton1", 0),))
+
+        down = self._mouse_event(hook, WM_XBUTTONDOWN, XBUTTON1)
+        up = self._mouse_event(hook, WM_XBUTTONUP, XBUTTON1)
+
+        self.assertEqual((down, up), (1, 1))
+        self.assertEqual(
+            hook._action_queue.get_nowait(),
+            KeyboardMappingAction(0),
+        )
+        self.assertTrue(hook._action_queue.empty())
+        hook._call_next.assert_not_called()
+
+    def test_keyboard_mapping_triggers_once_until_button_release(
+        self,
+    ) -> None:
+        hook = self._hook()
+        hook.set_keyboard_mappings((("xbutton2", 1),))
+
+        first_down = self._mouse_event(
+            hook, WM_XBUTTONDOWN, XBUTTON2
+        )
+        repeated_down = self._mouse_event(
+            hook, WM_XBUTTONDOWN, XBUTTON2
+        )
+        up = self._mouse_event(hook, WM_XBUTTONUP, XBUTTON2)
+
+        self.assertEqual((first_down, repeated_down, up), (1, 1, 1))
+        self.assertEqual(
+            hook._action_queue.get_nowait(),
+            KeyboardMappingAction(1),
+        )
+        self.assertTrue(hook._action_queue.empty())
+
+    def test_unmapped_side_button_still_passes_through(self) -> None:
+        hook = self._hook()
+        hook.set_keyboard_mappings((("xbutton1", 0),))
+
+        down = self._mouse_event(hook, WM_XBUTTONDOWN, XBUTTON2)
+        up = self._mouse_event(hook, WM_XBUTTONUP, XBUTTON2)
+
+        self.assertEqual((down, up), (73, 73))
+        self.assertTrue(hook._action_queue.empty())
+
     def test_left_button_always_passes_through(self) -> None:
         hook = self._hook(right_button_down=True)
         hook._state.press_right()
@@ -186,6 +236,21 @@ class SideButtonHookTests(unittest.TestCase):
                 self.assertEqual(action, HeldMouseAction.SCREENSHOT)
                 self.assertFalse(hook._suppressed_xbuttons)
                 hook._call_next.assert_not_called()
+
+    def test_right_hold_screenshot_has_priority_over_mapping(self) -> None:
+        hook = self._hook(right_button_down=True)
+        hook._state.press_right()
+        hook.set_keyboard_mappings((("xbutton1", 0),))
+
+        down = self._mouse_event(hook, WM_XBUTTONDOWN, XBUTTON1)
+        up = self._mouse_event(hook, WM_XBUTTONUP, XBUTTON1)
+
+        self.assertEqual((down, up), (1, 1))
+        self.assertEqual(
+            hook._action_queue.get_nowait(),
+            HeldMouseAction.SCREENSHOT,
+        )
+        self.assertTrue(hook._action_queue.empty())
 
     def test_consumed_right_down_tracks_hold_for_screenshot(self) -> None:
         hook = self._hook(right_button_down=False)
@@ -269,6 +334,9 @@ class SideButtonHookTests(unittest.TestCase):
 
     def test_test_mode_passes_every_control_through(self) -> None:
         hook = self._hook(right_button_down=True)
+        hook.set_keyboard_mappings(
+            (("xbutton1", 0), ("xbutton2", 1))
+        )
         hook.set_enabled(False)
         hook.set_test_mode(True)
         events = (
@@ -386,6 +454,31 @@ class SideButtonHookTests(unittest.TestCase):
 
         self.assertEqual(result, 73)
         hook._on_test_event.assert_not_called()
+
+    def test_driver_injected_side_button_runs_keyboard_mapping(
+        self,
+    ) -> None:
+        hook = self._hook()
+        hook.set_keyboard_mappings((("xbutton2", 1),))
+
+        down = self._mouse_event(
+            hook,
+            WM_XBUTTONDOWN,
+            XBUTTON2,
+            LLMHF_INJECTED,
+        )
+        up = self._mouse_event(
+            hook,
+            WM_XBUTTONUP,
+            XBUTTON2,
+            LLMHF_INJECTED,
+        )
+
+        self.assertEqual((down, up), (1, 1))
+        self.assertEqual(
+            hook._action_queue.get_nowait(),
+            KeyboardMappingAction(1),
+        )
 
 
 class MouseDataParsingTests(unittest.TestCase):

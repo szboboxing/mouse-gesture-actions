@@ -7,6 +7,7 @@ from unittest.mock import Mock, call, patch
 from actions import (
     ENHANCED_PASTE_DELAY_SECONDS,
     KEYEVENTF_KEYUP,
+    VK_ALT,
     VK_C,
     VK_CONTROL,
     VK_LWIN,
@@ -60,6 +61,59 @@ class FixedShortcutTests(unittest.TestCase):
                 call(VK_LWIN, 0, KEYEVENTF_KEYUP, 0),
             ],
         )
+
+    def test_custom_shortcut_orders_modifiers_and_releases_in_reverse(
+        self,
+    ) -> None:
+        result = self.actions.send_custom_shortcut(
+            ("shift", "ctrl", "alt"),
+            "a",
+        )
+
+        self.assertTrue(result.success)
+        self.assertEqual(result.detail, "Ctrl+Alt+Shift+A")
+        self.assertEqual(
+            self.actions._user32.keybd_event.call_args_list,
+            [
+                call(VK_CONTROL, 0, 0, 0),
+                call(VK_ALT, 0, 0, 0),
+                call(VK_SHIFT, 0, 0, 0),
+                call(ord("A"), 0, 0, 0),
+                call(ord("A"), 0, KEYEVENTF_KEYUP, 0),
+                call(VK_SHIFT, 0, KEYEVENTF_KEYUP, 0),
+                call(VK_ALT, 0, KEYEVENTF_KEYUP, 0),
+                call(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0),
+            ],
+        )
+
+    def test_custom_shortcut_allows_a_letter_without_modifiers(
+        self,
+    ) -> None:
+        result = self.actions.send_custom_shortcut((), "b")
+
+        self.assertTrue(result.success)
+        self.assertEqual(result.detail, "B")
+        self.assertEqual(
+            self.actions._user32.keybd_event.call_args_list,
+            [
+                call(ord("B"), 0, 0, 0),
+                call(ord("B"), 0, KEYEVENTF_KEYUP, 0),
+            ],
+        )
+
+    def test_custom_shortcut_rejects_invalid_modifier(self) -> None:
+        result = self.actions.send_custom_shortcut(("win",), "A")
+
+        self.assertFalse(result.success)
+        self.assertIn("修饰键", result.detail)
+        self.actions._user32.keybd_event.assert_not_called()
+
+    def test_custom_shortcut_rejects_non_letter_key(self) -> None:
+        result = self.actions.send_custom_shortcut(("ctrl",), "F1")
+
+        self.assertFalse(result.success)
+        self.assertIn("A-Z", result.detail)
+        self.actions._user32.keybd_event.assert_not_called()
 
 
 class EnhancedPasteTests(unittest.TestCase):

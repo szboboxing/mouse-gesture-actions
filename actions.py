@@ -18,6 +18,7 @@ from display_controls import DisplayController
 KEYEVENTF_KEYUP = 0x0002
 GA_ROOT = 2
 VK_CONTROL = 0x11
+VK_ALT = 0x12
 VK_SHIFT = 0x10
 VK_LWIN = 0x5B
 VK_C = ord("C")
@@ -78,6 +79,48 @@ class SystemActions:
             (VK_LWIN, VK_SHIFT, VK_S),
             "系统截图",
             "Win+Shift+S",
+        )
+
+    def send_custom_shortcut(
+        self,
+        modifiers: tuple[str, ...],
+        key: str,
+    ) -> ActionResult:
+        modifier_keys = {
+            "ctrl": (VK_CONTROL, "Ctrl"),
+            "alt": (VK_ALT, "Alt"),
+            "shift": (VK_SHIFT, "Shift"),
+        }
+        selected = {str(modifier).lower() for modifier in modifiers}
+        if selected.difference(modifier_keys):
+            return ActionResult(
+                False,
+                "自定义快捷键执行失败",
+                "包含不支持的修饰键",
+            )
+
+        letter = str(key).upper()
+        if len(letter) != 1 or not "A" <= letter <= "Z":
+            return ActionResult(
+                False,
+                "自定义快捷键执行失败",
+                "主键必须是 A-Z",
+            )
+
+        ordered_modifiers = tuple(
+            name for name in modifier_keys if name in selected
+        )
+        virtual_keys = tuple(
+            modifier_keys[name][0] for name in ordered_modifiers
+        ) + (ord(letter),)
+        shortcut_text = "+".join(
+            tuple(modifier_keys[name][1] for name in ordered_modifiers)
+            + (letter,)
+        )
+        return self._send_keys(
+            virtual_keys,
+            "自定义快捷键",
+            shortcut_text,
         )
 
     def create_folder_and_paste_clipboard(self) -> ActionResult:
