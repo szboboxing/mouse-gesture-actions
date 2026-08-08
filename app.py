@@ -10,12 +10,13 @@ from ctypes import wintypes
 from datetime import datetime
 from pathlib import Path
 from tkinter import messagebox, simpledialog, ttk
-from typing import Callable, Sequence
+from typing import Callable
 
-from actions import ActionResult, SystemActions, parse_shortcut
-from gesture_controller import ActionKind, GestureController, GestureOutcome
-from gesture_recognizer import Point
-from mouse_hook import GlobalRightButtonGestureHook
+from actions import ActionResult, SystemActions
+from mouse_hook import (
+    GlobalRightButtonActionHook,
+    HeldMouseAction,
+)
 from settings import AppSettings, load_settings
 from version import APP_NAME, VERSION_TAG
 
@@ -57,9 +58,8 @@ ENCOURAGEMENTS = (
 
 USAGE_LABELS = (
     ("copy", "复制"),
-    ("paste", "粘贴"),
+    ("paste", "增强粘贴"),
     ("screenshot", "截图"),
-    ("create_folder", "新建文件夹"),
     ("calculator", "计算器"),
     ("browser", "浏览器"),
     ("media", "媒体播放器"),
@@ -78,7 +78,6 @@ class GestureCard(tk.Frame):
         subtitle: str,
         action_text: str,
         accent: str,
-        shortcut_variable: tk.StringVar | None = None,
     ) -> None:
         super().__init__(
             parent,
@@ -129,84 +128,55 @@ class GestureCard(tk.Frame):
             font=("Microsoft YaHei UI", 8),
         ).grid(row=2, column=0, columnspan=2, sticky="w", pady=(14, 5))
 
-        if shortcut_variable is None:
-            tk.Label(
-                self,
-                text=action_text,
-                bg=COLORS["page"],
-                fg=COLORS["text"],
-                font=("Microsoft YaHei UI", 9, "bold"),
-                padx=10,
-                pady=7,
-                anchor="w",
-                justify="left",
-                wraplength=270,
-            ).grid(row=3, column=0, columnspan=2, sticky="ew")
-        else:
-            entry = tk.Entry(
-                self,
-                textvariable=shortcut_variable,
-                bg=COLORS["page"],
-                fg=COLORS["text"],
-                insertbackground=COLORS["text"],
-                relief="flat",
-                font=("Segoe UI", 10, "bold"),
-                highlightbackground=COLORS["line"],
-                highlightcolor=accent,
-                highlightthickness=1,
-            )
-            entry.grid(
-                row=3,
-                column=0,
-                columnspan=2,
-                sticky="ew",
-                ipady=7,
-            )
+        tk.Label(
+            self,
+            text=action_text,
+            bg=COLORS["page"],
+            fg=COLORS["text"],
+            font=("Microsoft YaHei UI", 9, "bold"),
+            padx=10,
+            pady=7,
+            anchor="w",
+            justify="left",
+            wraplength=270,
+        ).grid(row=3, column=0, columnspan=2, sticky="ew")
 
     @staticmethod
     def _draw_icon(canvas: tk.Canvas, gesture: str, accent: str) -> None:
         canvas.create_rectangle(0, 0, 54, 54, fill=COLORS["blue_soft"], outline="")
-        if gesture in {"circle_left", "circle_right"}:
-            start = 35 if gesture == "circle_left" else 145
-            extent = 285 if gesture == "circle_left" else -285
-            canvas.create_arc(
-                10,
-                10,
-                44,
-                44,
-                start=start,
-                extent=extent,
-                style="arc",
-                outline=accent,
-                width=4,
+        if gesture in {"wheel_up", "wheel_down"}:
+            canvas.create_oval(
+                13, 7, 41, 48, outline=accent, width=3
             )
-            if gesture == "circle_left":
-                canvas.create_polygon(
-                    9, 20, 18, 18, 14, 27, fill=accent, outline=""
+            canvas.create_line(27, 8, 27, 25, fill=accent, width=2)
+            if gesture == "wheel_up":
+                canvas.create_line(
+                    27, 12, 20, 20, fill=accent, width=3, arrow="first"
                 )
             else:
-                canvas.create_polygon(
-                    45, 20, 36, 18, 40, 27, fill=accent, outline=""
+                canvas.create_line(
+                    27, 12, 34, 20, fill=accent, width=3, arrow="last"
                 )
-        elif gesture == "check":
-            canvas.create_line(
-                10,
+        elif gesture == "xbutton1":
+            canvas.create_oval(
+                16, 7, 42, 48, outline=accent, width=3
+            )
+            canvas.create_rectangle(
+                9, 20, 18, 31, fill=accent, outline=""
+            )
+            canvas.create_text(
+                29,
                 28,
-                22,
-                40,
-                45,
-                14,
+                text="X1",
                 fill=accent,
-                width=5,
-                capstyle="round",
-                joinstyle="round",
+                font=("Segoe UI", 9, "bold"),
             )
         else:
             canvas.create_line(
-                11, 39, 40, 10, fill=accent, width=4, arrow="last"
+                17, 40, 17, 13, fill=accent, width=4, arrow="last"
             )
             canvas.create_line(
-                43, 16, 14, 45, fill=accent, width=4, arrow="last"
+                37, 14, 37, 41, fill=accent, width=4, arrow="last"
             )
 
 
@@ -215,30 +185,18 @@ class MouseGestureApp:
         self.root = root
         self.settings = load_settings()
         self.actions = SystemActions()
-        self.controller = GestureController(
-            self.settings.sensitivity,
-            self.settings.double_swipe_interval_ms,
-        )
-        self.action_shortcuts = {
-            ActionKind.COPY: self.settings.copy_shortcut,
-            ActionKind.PASTE: self.settings.paste_shortcut,
-            ActionKind.SCREENSHOT: self.settings.screenshot_shortcut,
-        }
         self.ui_events: queue.Queue[tuple[str, object]] = queue.Queue()
-        self.hook = GlobalRightButtonGestureHook(self._on_stroke)
+        self.hook = GlobalRightButtonActionHook(
+            self._on_held_action,
+            self.settings.screenshot_combo_interval_ms,
+        )
         self.usage_counts: Counter[str] = Counter()
         self.listening = False
         self.toast: tk.Toplevel | None = None
         self.toast_after_id: str | None = None
 
-        self.copy_var = tk.StringVar(value=self.settings.copy_shortcut)
-        self.paste_var = tk.StringVar(value=self.settings.paste_shortcut)
-        self.screenshot_var = tk.StringVar(
-            value=self.settings.screenshot_shortcut
-        )
-        self.sensitivity_var = tk.StringVar(value=self.settings.sensitivity)
         self.interval_var = tk.IntVar(
-            value=self.settings.double_swipe_interval_ms
+            value=self.settings.screenshot_combo_interval_ms
         )
         self.launch_var = tk.BooleanVar(value=self.settings.launch_listening)
         self.minimize_var = tk.BooleanVar(
@@ -396,7 +354,7 @@ class MouseGestureApp:
         ).grid(row=0, column=1, sticky="w")
         tk.Label(
             status_box,
-            text="普通右键单击保持正常",
+            text="未触发组合时保留原生右键菜单",
             bg=COLORS["nav_soft"],
             fg=COLORS["nav_muted"],
             font=("Microsoft YaHei UI", 8),
@@ -404,7 +362,7 @@ class MouseGestureApp:
 
         self.toggle_button = tk.Button(
             sidebar,
-            text="暂停手势监听",
+            text="暂停组合监听",
             command=self.toggle_listening,
             bg=COLORS["blue"],
             fg="#FFFFFF",
@@ -430,8 +388,8 @@ class MouseGestureApp:
         ).pack(anchor="w", pady=(0, 9))
         for text in (
             "1  按住鼠标右键",
-            "2  连续画出完整轨迹",
-            "3  松开右键立即执行",
+            "2  滚动滚轮或按 XButton1",
+            "3  松开右键退出自定义状态",
         ):
             tk.Label(
                 help_box,
@@ -452,21 +410,21 @@ class MouseGestureApp:
         title_box.pack(side="left")
         tk.Label(
             title_box,
-            text="手势控制面板",
+            text="右键组合控制面板",
             bg=COLORS["page"],
             fg=COLORS["text"],
             font=("Microsoft YaHei UI", 20, "bold"),
         ).pack(anchor="w")
         tk.Label(
             title_box,
-            text="将鼠标轨迹转换为键盘组合键和系统动作",
+            text="仅在按住右键期间识别滚轮和侧键组合",
             bg=COLORS["page"],
             fg=COLORS["muted"],
             font=("Microsoft YaHei UI", 9),
         ).pack(anchor="w", pady=(4, 0))
         tk.Label(
             header,
-            text="按住右键绘制",
+            text="方案 A · 右键保持",
             bg=COLORS["green_soft"],
             fg=COLORS["green"],
             padx=13,
@@ -490,36 +448,32 @@ class MouseGestureApp:
 
         card_specs = (
             (
-                "circle_left",
-                "左向圆圈",
-                "逆时针画圆",
+                "wheel_up",
                 "复制",
+                "右键按住 + 滚轮向上",
+                "复制选中的文本或文件（Ctrl+C）",
                 COLORS["blue"],
-                self.copy_var,
             ),
             (
-                "circle_right",
-                "右向圆圈",
-                "顺时针画圆",
-                "粘贴",
+                "wheel_down",
+                "增强粘贴",
+                "右键按住 + 滚轮向下",
+                "新建文件夹，进入重命名并粘贴剪贴板内容",
                 COLORS["green"],
-                self.paste_var,
             ),
             (
-                "check",
-                "对勾",
-                "先向右下，再向右上",
-                "截图",
+                "xbutton1",
+                "侧键截图",
+                "右键按住 + XButton1",
+                "调用系统截图工具（Win+Shift+S）",
                 COLORS["orange"],
-                self.screenshot_var,
             ),
             (
-                "double_swipe",
-                "同向快划两次",
-                "右上或左下，连续两次",
-                "当前目录新建文件夹",
+                "wheel_combo",
+                "滚轮组合截图",
+                "右键按住 + 上滚→下滚",
+                "在时间窗口内完成组合才调用系统截图",
                 COLORS["red"],
-                None,
             ),
         )
         for index, spec in enumerate(card_specs):
@@ -546,14 +500,14 @@ class MouseGestureApp:
         activity.columnconfigure(0, weight=1)
         tk.Label(
             activity,
-            text="识别记录",
+            text="触发记录",
             bg=COLORS["card"],
             fg=COLORS["text"],
             font=("Microsoft YaHei UI", 12, "bold"),
         ).grid(row=0, column=0, sticky="w")
         tk.Label(
             activity,
-            text="最近的手势和执行结果",
+            text="最近的组合动作和执行结果",
             bg=COLORS["card"],
             fg=COLORS["muted"],
             font=("Microsoft YaHei UI", 8),
@@ -694,7 +648,7 @@ class MouseGestureApp:
         settings_panel.pack(fill="x", padx=22, pady=(10, 8))
         tk.Label(
             settings_panel,
-            text="识别设置",
+            text="组合设置",
             bg=COLORS["card"],
             fg=COLORS["text"],
             font=("Microsoft YaHei UI", 11, "bold"),
@@ -702,49 +656,41 @@ class MouseGestureApp:
 
         tk.Label(
             settings_panel,
-            text="灵敏度",
+            text="上→下截图窗口(ms)",
             bg=COLORS["card"],
             fg=COLORS["muted"],
         ).grid(row=0, column=1, sticky="e", padx=(0, 6))
-        sensitivity = ttk.Combobox(
-            settings_panel,
-            textvariable=self.sensitivity_var,
-            values=("灵敏", "标准", "稳健"),
-            state="readonly",
-            width=7,
-            style="App.TCombobox",
-        )
-        sensitivity.grid(row=0, column=2, sticky="w")
-
-        tk.Label(
-            settings_panel,
-            text="双划间隔(ms)",
-            bg=COLORS["card"],
-            fg=COLORS["muted"],
-        ).grid(row=0, column=3, sticky="e", padx=(18, 6))
         interval = ttk.Spinbox(
             settings_panel,
-            from_=350,
-            to=1500,
-            increment=50,
+            from_=200,
+            to=300,
+            increment=10,
             textvariable=self.interval_var,
             width=7,
             style="App.TSpinbox",
         )
-        interval.grid(row=0, column=4, sticky="w")
+        interval.grid(row=0, column=2, sticky="w")
+
+        tk.Label(
+            settings_panel,
+            text="滚轮较松时建议调低，默认 250ms",
+            bg=COLORS["card"],
+            fg=COLORS["orange"],
+            font=("Microsoft YaHei UI", 8),
+        ).grid(row=0, column=3, sticky="w", padx=(12, 4))
 
         ttk.Checkbutton(
             settings_panel,
             text="启动后自动监听",
             variable=self.launch_var,
             style="App.TCheckbutton",
-        ).grid(row=0, column=5, padx=(18, 8))
+        ).grid(row=0, column=4, padx=(18, 8))
         ttk.Checkbutton(
             settings_panel,
             text="启动时最小化",
             variable=self.minimize_var,
             style="App.TCheckbutton",
-        ).grid(row=0, column=6, padx=(0, 10))
+        ).grid(row=0, column=5, padx=(0, 10))
 
         save_button = tk.Button(
             settings_panel,
@@ -761,8 +707,8 @@ class MouseGestureApp:
             pady=7,
             font=("Microsoft YaHei UI", 9, "bold"),
         )
-        save_button.grid(row=0, column=7, sticky="e")
-        settings_panel.columnconfigure(7, weight=1)
+        save_button.grid(row=0, column=6, sticky="e")
+        settings_panel.columnconfigure(6, weight=1)
         self._build_encouragement(page)
 
     def _build_quick_tools(self, page: tk.Frame) -> None:
@@ -992,7 +938,10 @@ class MouseGestureApp:
         self.listening = bool(self.settings.launch_listening)
         self.hook.set_enabled(self.listening)
         self._refresh_listening_state()
-        self._append_log("程序已就绪，右键单击保持正常", "muted")
+        self._append_log(
+            "程序已就绪，仅在按住右键时识别滚轮和 XButton1",
+            "muted",
+        )
         if self.settings.minimize_on_start:
             self.root.after(250, self.root.iconify)
 
@@ -1002,9 +951,8 @@ class MouseGestureApp:
             return
         self.listening = not self.listening
         self.hook.set_enabled(self.listening)
-        self.controller.reset_pending_swipe()
         self._refresh_listening_state()
-        state = "手势监听已启动" if self.listening else "手势监听已暂停"
+        state = "组合监听已启动" if self.listening else "组合监听已暂停"
         self._append_log(state, "success" if self.listening else "warning")
 
     def _refresh_listening_state(self) -> None:
@@ -1012,7 +960,7 @@ class MouseGestureApp:
             self.status_var.set("正在监听")
             self._set_status_dot(COLORS["green"])
             self.toggle_button.configure(
-                text="暂停手势监听",
+                text="暂停组合监听",
                 bg=COLORS["blue"],
                 activebackground="#405ED9",
             )
@@ -1020,7 +968,7 @@ class MouseGestureApp:
             self.status_var.set("监听已暂停")
             self._set_status_dot(COLORS["orange"])
             self.toggle_button.configure(
-                text="开始手势监听",
+                text="开始组合监听",
                 bg=COLORS["orange"],
                 activebackground="#C9761E",
             )
@@ -1159,22 +1107,15 @@ class MouseGestureApp:
 
     def save_settings(self) -> None:
         try:
-            parse_shortcut(self.copy_var.get())
-            parse_shortcut(self.paste_var.get())
-            parse_shortcut(self.screenshot_var.get())
             interval = int(self.interval_var.get())
-            if not 350 <= interval <= 1500:
-                raise ValueError("双划间隔必须在 350-1500 毫秒之间")
+            if not 200 <= interval <= 300:
+                raise ValueError("上→下截图窗口必须在 200-300 毫秒之间")
         except (ValueError, tk.TclError) as exc:
             messagebox.showwarning("设置未保存", str(exc))
             return
 
         self.settings = AppSettings(
-            copy_shortcut=self.copy_var.get().strip(),
-            paste_shortcut=self.paste_var.get().strip(),
-            screenshot_shortcut=self.screenshot_var.get().strip(),
-            sensitivity=self.sensitivity_var.get(),
-            double_swipe_interval_ms=interval,
+            screenshot_combo_interval_ms=interval,
             launch_listening=self.launch_var.get(),
             minimize_on_start=self.minimize_var.get(),
             custom_button_1_name=self.settings.custom_button_1_name,
@@ -1188,81 +1129,58 @@ class MouseGestureApp:
             messagebox.showerror("保存失败", str(exc))
             return
 
-        self.controller.update_settings(
-            self.settings.sensitivity,
-            self.settings.double_swipe_interval_ms,
-        )
-        self.action_shortcuts = {
-            ActionKind.COPY: self.settings.copy_shortcut,
-            ActionKind.PASTE: self.settings.paste_shortcut,
-            ActionKind.SCREENSHOT: self.settings.screenshot_shortcut,
-        }
+        self.hook.set_combo_interval_ms(interval)
         self._append_log("设置已保存并立即生效", "success")
         self._show_toast("设置已保存", COLORS["green"])
 
-    def _on_stroke(self, points: Sequence[Point]) -> None:
-        outcome = self.controller.process(points)
-        if outcome.action is None:
-            event_type = "warning" if outcome.awaiting_second_swipe else "muted"
-            self.ui_events.put(("gesture", (outcome, None, event_type)))
-            return
-
-        action_result = self._execute_action(outcome.action)
+    def _on_held_action(self, action: HeldMouseAction) -> None:
+        action_result = self._execute_held_action(action)
         event_type = "success" if action_result.success else "error"
         self.ui_events.put(
-            ("gesture", (outcome, action_result, event_type))
+            ("held_action", (action, action_result, event_type))
         )
 
-    def _execute_action(self, action: ActionKind) -> ActionResult:
-        if action is ActionKind.COPY:
-            return self.actions.send_shortcut(
-                self.action_shortcuts[ActionKind.COPY], "复制"
-            )
-        if action is ActionKind.PASTE:
-            return self.actions.send_shortcut(
-                self.action_shortcuts[ActionKind.PASTE], "粘贴"
-            )
-        if action is ActionKind.SCREENSHOT:
-            return self.actions.send_shortcut(
-                self.action_shortcuts[ActionKind.SCREENSHOT], "截图"
-            )
-        return self.actions.create_folder_in_active_directory()
+    def _execute_held_action(
+        self,
+        action: HeldMouseAction,
+    ) -> ActionResult:
+        if action is HeldMouseAction.COPY:
+            return self.actions.copy_selection()
+        if action is HeldMouseAction.ENHANCED_PASTE:
+            return self.actions.create_folder_and_paste_clipboard()
+        return self.actions.capture_screenshot()
 
     def _poll_ui_events(self) -> None:
         try:
             while True:
                 event_name, payload = self.ui_events.get_nowait()
-                if event_name == "gesture":
-                    outcome, action_result, event_type = payload
-                    self._display_outcome(outcome, action_result, event_type)
+                if event_name == "held_action":
+                    action, action_result, event_type = payload
+                    self._display_held_action(
+                        action,
+                        action_result,
+                        event_type,
+                    )
         except queue.Empty:
             pass
         self.root.after(60, self._poll_ui_events)
 
-    def _display_outcome(
+    def _display_held_action(
         self,
-        outcome: GestureOutcome,
-        action_result: ActionResult | None,
+        action: HeldMouseAction,
+        action_result: ActionResult,
         event_type: str,
     ) -> None:
-        confidence = (
-            f"{outcome.result.confidence * 100:.0f}%"
-            if outcome.result.confidence > 0
-            else "--"
-        )
-        if action_result is None:
-            text = f"{outcome.message}  ·  置信度 {confidence}"
-            toast_text = outcome.message
-        else:
-            text = (
-                f"{outcome.message}  ·  {action_result.message}"
-                f"  ·  置信度 {confidence}"
-            )
-            if action_result.detail:
-                text += f"\n{action_result.detail}"
-            toast_text = action_result.message
-            if action_result.success and outcome.action is not None:
-                self._record_usage(outcome.action.value)
+        trigger_text = {
+            HeldMouseAction.COPY: "右键 + 滚轮上滚",
+            HeldMouseAction.ENHANCED_PASTE: "右键 + 滚轮下滚",
+            HeldMouseAction.SCREENSHOT: "右键截图组合",
+        }[action]
+        text = f"{trigger_text}  ·  {action_result.message}"
+        if action_result.detail:
+            text += f"\n{action_result.detail}"
+        if action_result.success:
+            self._record_usage(action.value)
 
         self._append_log(text, event_type)
         accent = {
@@ -1270,7 +1188,7 @@ class MouseGestureApp:
             "warning": COLORS["orange"],
             "error": COLORS["red"],
         }.get(event_type, COLORS["muted"])
-        self._show_toast(toast_text, accent)
+        self._show_toast(action_result.message, accent)
 
     def _append_log(self, message: str, tag: str) -> None:
         timestamp = datetime.now().strftime("%H:%M:%S")

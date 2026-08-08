@@ -1,82 +1,129 @@
 from __future__ import annotations
 
-import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, call, patch
 
-from actions import SystemActions, _next_folder_path, parse_shortcut
-
-
-class ShortcutParserTests(unittest.TestCase):
-    def test_default_shortcuts(self) -> None:
-        self.assertEqual(parse_shortcut("Ctrl+C"), (0x11, ord("C")))
-        self.assertEqual(parse_shortcut("Ctrl+V"), (0x11, ord("V")))
-        self.assertEqual(
-            parse_shortcut("Win+Shift+S"),
-            (0x5B, 0x10, ord("S")),
-        )
-
-    def test_shortcut_is_case_insensitive(self) -> None:
-        self.assertEqual(parse_shortcut("ctrl + shift + a"), (0x11, 0x10, 0x41))
-
-    def test_unknown_key_is_rejected(self) -> None:
-        with self.assertRaises(ValueError):
-            parse_shortcut("Ctrl+不存在")
-
-    def test_duplicate_key_is_rejected(self) -> None:
-        with self.assertRaises(ValueError):
-            parse_shortcut("Ctrl+Ctrl+C")
+from actions import (
+    ENHANCED_PASTE_DELAY_SECONDS,
+    KEYEVENTF_KEYUP,
+    VK_C,
+    VK_CONTROL,
+    VK_LWIN,
+    VK_N,
+    VK_S,
+    VK_SHIFT,
+    VK_V,
+    ActionResult,
+    SystemActions,
+)
 
 
-class FolderNamingTests(unittest.TestCase):
-    def test_first_folder_uses_default_name(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            target = _next_folder_path(Path(directory))
-            self.assertEqual(target.name, "新建文件夹")
-
-    def test_existing_folder_uses_numbered_name(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            (root / "新建文件夹").mkdir()
-            (root / "新建文件夹 (2)").mkdir()
-            target = _next_folder_path(root)
-            self.assertEqual(target.name, "新建文件夹 (3)")
-
-    def test_create_folder_action_uses_active_directory(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            with patch(
-                "actions.get_active_explorer_directory",
-                return_value=root,
-            ):
-                result = SystemActions().create_folder_in_active_directory()
-            self.assertTrue(result.success)
-            self.assertTrue((root / "新建文件夹").is_dir())
+class FakeUser32:
+    def __init__(self) -> None:
+        self.keybd_event = Mock()
 
 
-class QuickActionTests(unittest.TestCase):
-    @patch("actions.DisplayController")
-    @patch("actions.os.startfile")
-    def test_calculator_uses_windows_calculator(
-        self,
-        startfile,
-        _display_controller,
-    ) -> None:
-        result = SystemActions().open_calculator()
+class FixedShortcutTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.actions = SystemActions.__new__(SystemActions)
+        self.actions._user32 = FakeUser32()
+
+    def test_copy_sends_ctrl_c_in_press_release_order(self) -> None:
+        result = self.actions.copy_selection()
 
         self.assertTrue(result.success)
-        startfile.assert_called_once_with("calc.exe")
+        self.assertEqual(result.detail, "Ctrl+C")
+        self.assertEqual(
+            self.actions._user32.keybd_event.call_args_list,
+            [
+                call(VK_CONTROL, 0, 0, 0),
+                call(VK_C, 0, 0, 0),
+                call(VK_C, 0, KEYEVENTF_KEYUP, 0),
+                call(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0),
+            ],
+        )
 
-    @patch("actions.DisplayController")
-    def test_empty_custom_target_requests_configuration(
+    def test_screenshot_sends_win_shift_s_in_press_release_order(self) -> None:
+        result = self.actions.capture_screenshot()
+
+        self.assertTrue(result.success)
+        self.assertEqual(result.detail, "Win+Shift+S")
+        self.assertEqual(
+            self.actions._user32.keybd_event.call_args_list,
+            [
+                call(VK_LWIN, 0, 0, 0),
+                call(VK_SHIFT, 0, 0, 0),
+                call(VK_S, 0, 0, 0),
+                call(VK_S, 0, KEYEVENTF_KEYUP, 0),
+                call(VK_SHIFT, 0, KEYEVENTF_KEYUP, 0),
+                call(VK_LWIN, 0, KEYEVENTF_KEYUP, 0),
+            ],
+        )
+
+
+class EnhancedPasteTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.actions = SystemActions.__new__(SystemActions)
+        self.actions._send_keys = Mock(
+            side_effect=[
+                ActionResult(True, "已执行新建文件夹", "Ctrl+Shift+N"),
+                ActionResult(True, "已执行粘贴剪贴板内容", "Ctrl+V"),
+            ]
+        )
+
+    @patch("actions.pythoncom.CoUninitialize")
+    @patch("actions.pythoncom.CoInitialize")
+    @patch("actions.time.sleep")
+    @patch(
+        "actions.get_active_explorer_directory",
+        return_value=Path("D:/work"),
+    )
+    def test_creates_folder_then_pastes_into_rename_field(
         self,
-        _display_controller,
+        _get_directory: Mock,
+        sleep: Mock,
+        co_initialize: Mock,
+        co_uninitialize: Mock,
     ) -> None:
-        result = SystemActions().open_custom_target("", "自定义 1")
+        result = self.actions.create_folder_and_paste_clipboard()
+
+        self.assertTrue(result.success)
+        self.assertEqual(
+            self.actions._send_keys.call_args_list,
+            [
+                call(
+                    (VK_CONTROL, VK_SHIFT, VK_N),
+                    "新建文件夹",
+                    "Ctrl+Shift+N",
+                ),
+                call(
+                    (VK_CONTROL, VK_V),
+                    "粘贴剪贴板内容",
+                    "Ctrl+V",
+                ),
+            ],
+        )
+        sleep.assert_called_once_with(ENHANCED_PASTE_DELAY_SECONDS)
+        co_initialize.assert_called_once_with()
+        co_uninitialize.assert_called_once_with()
+
+    @patch("actions.pythoncom.CoUninitialize")
+    @patch("actions.pythoncom.CoInitialize")
+    @patch("actions.get_active_explorer_directory", return_value=None)
+    def test_rejects_non_explorer_foreground_window(
+        self,
+        _get_directory: Mock,
+        co_initialize: Mock,
+        co_uninitialize: Mock,
+    ) -> None:
+        result = self.actions.create_folder_and_paste_clipboard()
 
         self.assertFalse(result.success)
-        self.assertIn("右键", result.detail)
+        self.assertIn("资源管理器", result.detail)
+        self.actions._send_keys.assert_not_called()
+        co_initialize.assert_called_once_with()
+        co_uninitialize.assert_called_once_with()
 
 
 if __name__ == "__main__":

@@ -9,15 +9,14 @@ from typing import Any
 
 CONFIG_DIR = Path(os.environ.get("APPDATA", Path.home())) / "MouseGestureActions"
 CONFIG_PATH = CONFIG_DIR / "settings.json"
+MIN_SCREENSHOT_COMBO_INTERVAL_MS = 200
+MAX_SCREENSHOT_COMBO_INTERVAL_MS = 300
+DEFAULT_SCREENSHOT_COMBO_INTERVAL_MS = 250
 
 
 @dataclass(slots=True)
 class AppSettings:
-    copy_shortcut: str = "Ctrl+C"
-    paste_shortcut: str = "Ctrl+V"
-    screenshot_shortcut: str = "Win+Shift+S"
-    sensitivity: str = "标准"
-    double_swipe_interval_ms: int = 850
+    screenshot_combo_interval_ms: int = DEFAULT_SCREENSHOT_COMBO_INTERVAL_MS
     launch_listening: bool = True
     minimize_on_start: bool = False
     custom_button_1_name: str = "自定义 1"
@@ -30,11 +29,13 @@ class AppSettings:
         allowed = {item.name for item in fields(cls)}
         values = {key: value for key, value in data.items() if key in allowed}
         settings = cls(**values)
-        settings.double_swipe_interval_ms = max(
-            350, min(1500, int(settings.double_swipe_interval_ms))
+        settings.screenshot_combo_interval_ms = max(
+            MIN_SCREENSHOT_COMBO_INTERVAL_MS,
+            min(
+                MAX_SCREENSHOT_COMBO_INTERVAL_MS,
+                int(settings.screenshot_combo_interval_ms),
+            ),
         )
-        if settings.sensitivity not in {"灵敏", "标准", "稳健"}:
-            settings.sensitivity = "标准"
         settings.custom_button_1_name = (
             str(settings.custom_button_1_name).strip() or "自定义 1"
         )[:12]

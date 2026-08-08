@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import ctypes
 import os
-import re
 import time
 import webbrowser
 from dataclasses import dataclass
@@ -18,35 +17,14 @@ from display_controls import DisplayController
 
 KEYEVENTF_KEYUP = 0x0002
 GA_ROOT = 2
-
-VK_ALIASES = {
-    "CTRL": 0x11,
-    "CONTROL": 0x11,
-    "SHIFT": 0x10,
-    "ALT": 0x12,
-    "WIN": 0x5B,
-    "WINDOWS": 0x5B,
-    "SPACE": 0x20,
-    "ENTER": 0x0D,
-    "RETURN": 0x0D,
-    "TAB": 0x09,
-    "ESC": 0x1B,
-    "ESCAPE": 0x1B,
-    "BACKSPACE": 0x08,
-    "DELETE": 0x2E,
-    "INSERT": 0x2D,
-    "HOME": 0x24,
-    "END": 0x23,
-    "PAGEUP": 0x21,
-    "PAGEDOWN": 0x22,
-    "UP": 0x26,
-    "DOWN": 0x28,
-    "LEFT": 0x25,
-    "RIGHT": 0x27,
-}
-
-for _function_number in range(1, 25):
-    VK_ALIASES[f"F{_function_number}"] = 0x6F + _function_number
+VK_CONTROL = 0x11
+VK_SHIFT = 0x10
+VK_LWIN = 0x5B
+VK_C = ord("C")
+VK_N = ord("N")
+VK_S = ord("S")
+VK_V = ord("V")
+ENHANCED_PASTE_DELAY_SECONDS = 0.20
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,12 +45,12 @@ class SystemActions:
             ctypes.c_size_t,
         )
 
-    def send_shortcut(self, shortcut: str, action_name: str) -> ActionResult:
-        try:
-            keys = parse_shortcut(shortcut)
-        except ValueError as exc:
-            return ActionResult(False, f"{action_name}未执行", str(exc))
-
+    def _send_keys(
+        self,
+        keys: tuple[int, ...],
+        action_name: str,
+        shortcut_text: str,
+    ) -> ActionResult:
         try:
             for virtual_key in keys:
                 self._user32.keybd_event(virtual_key, 0, 0, 0)
@@ -80,9 +58,68 @@ class SystemActions:
                 self._user32.keybd_event(
                     virtual_key, 0, KEYEVENTF_KEYUP, 0
                 )
-            return ActionResult(True, f"已执行{action_name}", shortcut)
+            return ActionResult(
+                True,
+                f"已执行{action_name}",
+                shortcut_text,
+            )
         except OSError as exc:
             return ActionResult(False, f"{action_name}执行失败", str(exc))
+
+    def copy_selection(self) -> ActionResult:
+        return self._send_keys(
+            (VK_CONTROL, VK_C),
+            "复制",
+            "Ctrl+C",
+        )
+
+    def capture_screenshot(self) -> ActionResult:
+        return self._send_keys(
+            (VK_LWIN, VK_SHIFT, VK_S),
+            "系统截图",
+            "Win+Shift+S",
+        )
+
+    def create_folder_and_paste_clipboard(self) -> ActionResult:
+        pythoncom.CoInitialize()
+        try:
+            directory = get_active_explorer_directory()
+            if directory is None:
+                return ActionResult(
+                    False,
+                    "增强粘贴未执行",
+                    "请先激活文件资源管理器或桌面",
+                )
+
+            create_result = self._send_keys(
+                (VK_CONTROL, VK_SHIFT, VK_N),
+                "新建文件夹",
+                "Ctrl+Shift+N",
+            )
+            if not create_result.success:
+                return create_result
+
+            time.sleep(ENHANCED_PASTE_DELAY_SECONDS)
+            paste_result = self._send_keys(
+                (VK_CONTROL, VK_V),
+                "粘贴剪贴板内容",
+                "Ctrl+V",
+            )
+            if not paste_result.success:
+                return ActionResult(
+                    False,
+                    "文件夹已新建，但剪贴板内容粘贴失败",
+                    paste_result.detail,
+                )
+            return ActionResult(
+                True,
+                "已执行增强粘贴",
+                f"已在 {directory} 新建文件夹并粘贴剪贴板内容",
+            )
+        except (OSError, pythoncom.com_error) as exc:
+            return ActionResult(False, "增强粘贴执行失败", str(exc))
+        finally:
+            pythoncom.CoUninitialize()
 
     def open_calculator(self) -> ActionResult:
         return self._open_target("calc.exe", "计算器")
@@ -144,25 +181,6 @@ class SystemActions:
             )
         return self._open_target(target, action_name)
 
-    def create_folder_in_active_directory(self) -> ActionResult:
-        pythoncom.CoInitialize()
-        try:
-            directory = get_active_explorer_directory()
-            if directory is None:
-                return ActionResult(
-                    False,
-                    "未新建文件夹",
-                    "请先激活文件资源管理器或桌面，再连续完成两次快划",
-                )
-
-            target = _next_folder_path(directory)
-            target.mkdir()
-            return ActionResult(True, "已新建文件夹", str(target))
-        except (OSError, pythoncom.com_error) as exc:
-            return ActionResult(False, "新建文件夹失败", str(exc))
-        finally:
-            pythoncom.CoUninitialize()
-
     @staticmethod
     def _open_target(target: str, action_name: str) -> ActionResult:
         try:
@@ -170,39 +188,6 @@ class SystemActions:
             return ActionResult(True, f"已启动{action_name}", target)
         except OSError as exc:
             return ActionResult(False, f"{action_name}启动失败", str(exc))
-
-
-def parse_shortcut(shortcut: str) -> tuple[int, ...]:
-    tokens = [
-        token.strip().upper()
-        for token in re.split(r"\s*\+\s*", shortcut.strip())
-        if token.strip()
-    ]
-    if not tokens:
-        raise ValueError("快捷键不能为空")
-    if len(tokens) > 5:
-        raise ValueError("快捷键最多包含 5 个按键")
-
-    virtual_keys: list[int] = []
-    for token in tokens:
-        if token in VK_ALIASES:
-            virtual_key = VK_ALIASES[token]
-        elif len(token) == 1 and ("A" <= token <= "Z" or "0" <= token <= "9"):
-            virtual_key = ord(token)
-        else:
-            raise ValueError(f"不支持的按键：{token}")
-        if virtual_key in virtual_keys:
-            raise ValueError(f"快捷键包含重复按键：{token}")
-        virtual_keys.append(virtual_key)
-
-    if len(virtual_keys) == 1 and virtual_keys[0] in {
-        VK_ALIASES["CTRL"],
-        VK_ALIASES["SHIFT"],
-        VK_ALIASES["ALT"],
-        VK_ALIASES["WIN"],
-    }:
-        raise ValueError("快捷键不能只有修饰键")
-    return tuple(virtual_keys)
 
 
 def get_active_explorer_directory() -> Path | None:
@@ -230,15 +215,3 @@ def get_active_explorer_directory() -> Path | None:
         except (AttributeError, TypeError, pythoncom.com_error):
             continue
     return None
-
-
-def _next_folder_path(directory: Path) -> Path:
-    base = directory / "新建文件夹"
-    if not base.exists():
-        return base
-
-    for number in range(2, 10_000):
-        candidate = directory / f"新建文件夹 ({number})"
-        if not candidate.exists():
-            return candidate
-    return directory / f"新建文件夹 ({time.strftime('%Y%m%d-%H%M%S')})"

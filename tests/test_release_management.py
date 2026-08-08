@@ -14,7 +14,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 class VersionMetadataTests(unittest.TestCase):
     def test_version_is_windows_compatible(self) -> None:
-        self.assertEqual(version_tuple(), (1, 1, 0, 0))
+        self.assertEqual(version_tuple(), (1, 2, 0, 0))
 
     def test_current_release_has_version_notes(self) -> None:
         notes_path = (
