@@ -1175,8 +1175,8 @@ class MouseGestureApp:
             )
 
         for control, top, label in (
-            (MouseControl.XBUTTON1, 246, "X1\n上一页"),
-            (MouseControl.XBUTTON2, 320, "X2\n下一页"),
+            (MouseControl.XBUTTON2, 246, "X2\n下一页"),
+            (MouseControl.XBUTTON1, 320, "X1\n上一页"),
         ):
             button = canvas.create_rectangle(
                 127,

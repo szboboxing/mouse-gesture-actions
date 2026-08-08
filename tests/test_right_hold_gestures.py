@@ -8,6 +8,7 @@ from unittest.mock import Mock
 
 from mouse_hook import (
     HC_ACTION,
+    LLMHF_INJECTED,
     MSLLHOOKSTRUCT,
     WM_LBUTTONDOWN,
     WM_LBUTTONUP,
@@ -107,11 +108,7 @@ class RightHoldGestureStateTests(unittest.TestCase):
         self.assertIsNone(decision.action)
 
 class FakeUser32:
-    def __init__(self, right_button_down: bool = False) -> None:
-        self.right_button_down = right_button_down
-
-    def GetAsyncKeyState(self, _key: int) -> int:
-        return 0x8000 if self.right_button_down else 0
+    pass
 
 
 class SideButtonHookTests(unittest.TestCase):
@@ -130,8 +127,9 @@ class SideButtonHookTests(unittest.TestCase):
         hook._metrics = MouseMetricsTracker()
         hook._screenshot_xbuttons = {XBUTTON1, XBUTTON2}
         hook._suppressed_xbuttons = set()
+        hook._right_button_down = right_button_down
         hook._action_queue = queue.Queue()
-        hook._user32 = FakeUser32(right_button_down)
+        hook._user32 = FakeUser32()
         hook._call_next = Mock(return_value=73)
         hook._replay_right_click = Mock()
         return hook
@@ -141,9 +139,11 @@ class SideButtonHookTests(unittest.TestCase):
         hook: GlobalRightButtonActionHook,
         message: int,
         high_word: int = 0,
+        flags: int = 0,
     ) -> int:
         data = MSLLHOOKSTRUCT()
         data.mouseData = high_word << 16
+        data.flags = flags
         return hook._mouse_proc(
             HC_ACTION,
             message,
@@ -187,10 +187,38 @@ class SideButtonHookTests(unittest.TestCase):
                 self.assertFalse(hook._suppressed_xbuttons)
                 hook._call_next.assert_not_called()
 
+    def test_consumed_right_down_tracks_hold_for_screenshot(self) -> None:
+        hook = self._hook(right_button_down=False)
+
+        right_down = self._mouse_event(hook, WM_RBUTTONDOWN)
+        side_down = self._mouse_event(
+            hook,
+            WM_XBUTTONDOWN,
+            XBUTTON1,
+            LLMHF_INJECTED,
+        )
+        side_up = self._mouse_event(
+            hook,
+            WM_XBUTTONUP,
+            XBUTTON1,
+            LLMHF_INJECTED,
+        )
+        right_up = self._mouse_event(hook, WM_RBUTTONUP)
+
+        self.assertEqual(
+            (right_down, side_down, side_up, right_up),
+            (1, 1, 1, 1),
+        )
+        self.assertEqual(
+            hook._action_queue.get_nowait(),
+            HeldMouseAction.SCREENSHOT,
+        )
+        self.assertFalse(hook._right_button_down)
+
     def test_only_confirmed_side_buttons_trigger_screenshot(self) -> None:
-        hook = self._hook(right_button_down=True)
+        hook = self._hook()
         hook.set_screenshot_side_buttons((MouseControl.XBUTTON1,))
-        hook._state.press_right()
+        self._mouse_event(hook, WM_RBUTTONDOWN)
 
         unconfirmed_down = self._mouse_event(
             hook,
@@ -270,7 +298,7 @@ class SideButtonHookTests(unittest.TestCase):
         self.assertFalse(hook._state.active)
 
     def test_leaving_test_mode_restores_right_hold_actions(self) -> None:
-        hook = self._hook(right_button_down=True)
+        hook = self._hook()
         hook.set_test_mode(True)
         test_result = self._mouse_event(
             hook,
@@ -279,7 +307,7 @@ class SideButtonHookTests(unittest.TestCase):
         )
 
         hook.set_test_mode(False)
-        hook._state.press_right()
+        self._mouse_event(hook, WM_RBUTTONDOWN)
         action_result = self._mouse_event(
             hook,
             WM_XBUTTONDOWN,
@@ -292,6 +320,72 @@ class SideButtonHookTests(unittest.TestCase):
             hook._action_queue.get_nowait(),
             HeldMouseAction.SCREENSHOT,
         )
+
+    def test_driver_injected_side_button_is_testable(self) -> None:
+        hook = self._hook()
+        hook.set_test_mode(True)
+
+        down = self._mouse_event(
+            hook,
+            WM_XBUTTONDOWN,
+            XBUTTON2,
+            LLMHF_INJECTED,
+        )
+        up = self._mouse_event(
+            hook,
+            WM_XBUTTONUP,
+            XBUTTON2,
+            LLMHF_INJECTED,
+        )
+
+        self.assertEqual((down, up), (73, 73))
+        self.assertEqual(
+            hook._on_test_event.call_args_list,
+            [
+                unittest.mock.call(
+                    MouseTestEvent(MouseControl.XBUTTON2, True)
+                ),
+                unittest.mock.call(
+                    MouseTestEvent(MouseControl.XBUTTON2, False)
+                ),
+            ],
+        )
+
+    def test_driver_injected_side_button_runs_screenshot(self) -> None:
+        hook = self._hook(right_button_down=True)
+        hook._state.press_right()
+
+        down = self._mouse_event(
+            hook,
+            WM_XBUTTONDOWN,
+            XBUTTON1,
+            LLMHF_INJECTED,
+        )
+        up = self._mouse_event(
+            hook,
+            WM_XBUTTONUP,
+            XBUTTON1,
+            LLMHF_INJECTED,
+        )
+
+        self.assertEqual((down, up), (1, 1))
+        self.assertEqual(
+            hook._action_queue.get_nowait(),
+            HeldMouseAction.SCREENSHOT,
+        )
+
+    def test_other_injected_mouse_events_stay_filtered(self) -> None:
+        hook = self._hook()
+        hook.set_test_mode(True)
+
+        result = self._mouse_event(
+            hook,
+            WM_LBUTTONDOWN,
+            flags=LLMHF_INJECTED,
+        )
+
+        self.assertEqual(result, 73)
+        hook._on_test_event.assert_not_called()
 
 
 class MouseDataParsingTests(unittest.TestCase):

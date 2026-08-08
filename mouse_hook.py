@@ -25,7 +25,6 @@ WM_XBUTTONUP = 0x020C
 WM_QUIT = 0x0012
 XBUTTON1 = 0x0001
 XBUTTON2 = 0x0002
-VK_RBUTTON = 0x02
 LLMHF_INJECTED = 0x00000001
 MOUSEEVENTF_RIGHTDOWN = 0x0008
 MOUSEEVENTF_RIGHTUP = 0x0010
@@ -195,6 +194,7 @@ class GlobalRightButtonActionHook:
         self._metrics = MouseMetricsTracker()
         self._screenshot_xbuttons = {XBUTTON1, XBUTTON2}
         self._suppressed_xbuttons: set[int] = set()
+        self._right_button_down = False
         self._hook = None
         self._hook_thread: threading.Thread | None = None
         self._dispatch_thread: threading.Thread | None = None
@@ -223,12 +223,14 @@ class GlobalRightButtonActionHook:
             if not enabled:
                 self._state.cancel()
                 self._suppressed_xbuttons.clear()
+                self._right_button_down = False
 
     def set_test_mode(self, enabled: bool) -> None:
         with self._lock:
             self._test_mode = enabled
             self._state.cancel()
             self._suppressed_xbuttons.clear()
+            self._right_button_down = False
 
     def set_screenshot_side_buttons(
         self,
@@ -248,6 +250,7 @@ class GlobalRightButtonActionHook:
             self._screenshot_xbuttons = configured
             self._state.cancel()
             self._suppressed_xbuttons.clear()
+            self._right_button_down = False
 
     def snapshot_metrics(self) -> MouseMetrics:
         return self._metrics.snapshot()
@@ -310,8 +313,6 @@ class GlobalRightButtonActionHook:
             wintypes.LPARAM,
         )
         self._user32.CallNextHookEx.restype = LRESULT
-        self._user32.GetAsyncKeyState.argtypes = (ctypes.c_int,)
-        self._user32.GetAsyncKeyState.restype = wintypes.SHORT
         self._user32.UnhookWindowsHookEx.argtypes = (wintypes.HHOOK,)
         self._user32.UnhookWindowsHookEx.restype = wintypes.BOOL
         self._user32.GetMessageW.argtypes = (
@@ -376,7 +377,11 @@ class GlobalRightButtonActionHook:
             data = ctypes.cast(
                 data_pointer, ctypes.POINTER(MSLLHOOKSTRUCT)
             ).contents
-            if data.flags & LLMHF_INJECTED:
+            injected_xbutton = (
+                data.flags & LLMHF_INJECTED
+                and message in (WM_XBUTTONDOWN, WM_XBUTTONUP)
+            )
+            if data.flags & LLMHF_INJECTED and not injected_xbutton:
                 return self._call_next(code, message, data_pointer)
 
             now = time.perf_counter()
@@ -399,6 +404,7 @@ class GlobalRightButtonActionHook:
                     return self._call_next(code, message, data_pointer)
 
                 if message == WM_RBUTTONDOWN:
+                    self._right_button_down = True
                     self._state.press_right()
                     consume = True
                 elif message == WM_MOUSEWHEEL and self._state.active:
@@ -411,7 +417,7 @@ class GlobalRightButtonActionHook:
                 elif message == WM_XBUTTONDOWN:
                     xbutton = _high_word(data.mouseData)
                     if xbutton in (XBUTTON1, XBUTTON2):
-                        right_button_down = self._is_right_button_down()
+                        right_button_down = self._right_button_down
                         if (
                             xbutton in self._screenshot_xbuttons
                             and self._state.active
@@ -429,11 +435,13 @@ class GlobalRightButtonActionHook:
                     if xbutton in self._suppressed_xbuttons:
                         self._suppressed_xbuttons.remove(xbutton)
                         consume = True
-                elif message == WM_RBUTTONUP and self._state.active:
-                    decision = self._state.release_right()
-                    action = decision.action
-                    replay_right_click = decision.replay_right_click
-                    consume = True
+                elif message == WM_RBUTTONUP:
+                    self._right_button_down = False
+                    if self._state.active:
+                        decision = self._state.release_right()
+                        action = decision.action
+                        replay_right_click = decision.replay_right_click
+                        consume = True
 
             if action is not None:
                 self._action_queue.put(action)
@@ -445,11 +453,9 @@ class GlobalRightButtonActionHook:
             with self._lock:
                 self._state.cancel()
                 self._suppressed_xbuttons.clear()
+                self._right_button_down = False
 
         return self._call_next(code, message, data_pointer)
-
-    def _is_right_button_down(self) -> bool:
-        return bool(self._user32.GetAsyncKeyState(VK_RBUTTON) & 0x8000)
 
     def _call_next(self, code: int, message: int, data_pointer: int) -> int:
         return int(
