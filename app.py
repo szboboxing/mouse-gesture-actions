@@ -137,6 +137,7 @@ KEYBOARD_MAPPING_MODIFIER_LABELS = {
     "ctrl": "Ctrl",
     "alt": "Alt",
     "shift": "Shift",
+    "win": "Win",
 }
 
 

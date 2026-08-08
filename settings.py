@@ -11,8 +11,11 @@ CONFIG_DIR = Path(os.environ.get("APPDATA", Path.home())) / "MouseGestureActions
 CONFIG_PATH = CONFIG_DIR / "settings.json"
 DEFAULT_SCREENSHOT_SIDE_BUTTONS = ("xbutton1", "xbutton2")
 KEYBOARD_MAPPING_MOUSE_BUTTONS = ("xbutton1", "xbutton2")
-KEYBOARD_MAPPING_MODIFIERS = ("ctrl", "alt", "shift")
-KEYBOARD_MAPPING_KEYS = tuple(chr(code) for code in range(ord("A"), ord("Z") + 1))
+KEYBOARD_MAPPING_MODIFIERS = ("ctrl", "alt", "shift", "win")
+KEYBOARD_MAPPING_KEYS = (
+    tuple(chr(code) for code in range(ord("A"), ord("Z") + 1))
+    + tuple(f"F{number}" for number in range(1, 13))
+)
 
 
 @dataclass(frozen=True, slots=True)

@@ -4,11 +4,25 @@ import unittest
 
 from settings import (
     AppSettings,
+    KEYBOARD_MAPPING_KEYS,
+    KEYBOARD_MAPPING_MODIFIERS,
     KeyboardMappingSettings,
 )
 
 
 class SettingsTests(unittest.TestCase):
+    def test_keyboard_mapping_options_include_win_and_function_keys(
+        self,
+    ) -> None:
+        self.assertEqual(
+            KEYBOARD_MAPPING_MODIFIERS,
+            ("ctrl", "alt", "shift", "win"),
+        )
+        self.assertEqual(KEYBOARD_MAPPING_KEYS[:2], ("A", "B"))
+        self.assertEqual(KEYBOARD_MAPPING_KEYS[-12:], tuple(
+            f"F{number}" for number in range(1, 13)
+        ))
+
     def test_old_gesture_and_combo_settings_are_ignored(self) -> None:
         settings = AppSettings.from_mapping(
             {
@@ -92,8 +106,9 @@ class SettingsTests(unittest.TestCase):
                             "CTRL",
                             "unsupported",
                             "alt",
+                            "win",
                         ],
-                        "key": "a",
+                        "key": "f12",
                         "enabled": True,
                     },
                     {
@@ -111,8 +126,8 @@ class SettingsTests(unittest.TestCase):
             (
                 KeyboardMappingSettings(
                     "xbutton2",
-                    ("ctrl", "alt", "shift"),
-                    "A",
+                    ("ctrl", "alt", "shift", "win"),
+                    "F12",
                     True,
                 ),
                 KeyboardMappingSettings(
@@ -131,7 +146,7 @@ class SettingsTests(unittest.TestCase):
                     {
                         "mouse_button": "middle",
                         "modifiers": "ctrl",
-                        "key": "F1",
+                        "key": "F13",
                         "enabled": "yes",
                     }
                 ]

@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 
 from app import (
+    KEYBOARD_MAPPING_MODIFIER_LABELS,
     KEYBOARD_MAPPING_MOUSE_LABELS,
     KEYBOARD_MAPPING_MOUSE_VALUES,
     MOUSE_TEST_DIAGRAM_LABELS,
@@ -13,6 +14,17 @@ from mouse_hook import MouseControl
 
 
 class SideButtonLabelTests(unittest.TestCase):
+    def test_keyboard_mapping_modifier_labels_include_win(self) -> None:
+        self.assertEqual(
+            KEYBOARD_MAPPING_MODIFIER_LABELS,
+            {
+                "ctrl": "Ctrl",
+                "alt": "Alt",
+                "shift": "Shift",
+                "win": "Win",
+            },
+        )
+
     def test_mouse_test_labels_are_swapped_without_changing_controls(
         self,
     ) -> None:

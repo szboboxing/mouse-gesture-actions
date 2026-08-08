@@ -13,6 +13,7 @@ import win32gui
 from win32com.shell import shell, shellcon
 
 from display_controls import DisplayController
+from settings import KEYBOARD_MAPPING_KEYS
 
 
 KEYEVENTF_KEYUP = 0x0002
@@ -21,6 +22,7 @@ VK_CONTROL = 0x11
 VK_ALT = 0x12
 VK_SHIFT = 0x10
 VK_LWIN = 0x5B
+VK_F1 = 0x70
 VK_C = ord("C")
 VK_N = ord("N")
 VK_S = ord("S")
@@ -90,6 +92,7 @@ class SystemActions:
             "ctrl": (VK_CONTROL, "Ctrl"),
             "alt": (VK_ALT, "Alt"),
             "shift": (VK_SHIFT, "Shift"),
+            "win": (VK_LWIN, "Win"),
         }
         selected = {str(modifier).lower() for modifier in modifiers}
         if selected.difference(modifier_keys):
@@ -99,23 +102,28 @@ class SystemActions:
                 "包含不支持的修饰键",
             )
 
-        letter = str(key).upper()
-        if len(letter) != 1 or not "A" <= letter <= "Z":
+        key_name = str(key).upper()
+        if key_name not in KEYBOARD_MAPPING_KEYS:
             return ActionResult(
                 False,
                 "自定义快捷键执行失败",
-                "主键必须是 A-Z",
+                "主键必须是 A-Z 或 F1-F12",
             )
 
         ordered_modifiers = tuple(
             name for name in modifier_keys if name in selected
         )
+        key_virtual_key = (
+            ord(key_name)
+            if len(key_name) == 1
+            else VK_F1 + int(key_name[1:]) - 1
+        )
         virtual_keys = tuple(
             modifier_keys[name][0] for name in ordered_modifiers
-        ) + (ord(letter),)
+        ) + (key_virtual_key,)
         shortcut_text = "+".join(
             tuple(modifier_keys[name][1] for name in ordered_modifiers)
-            + (letter,)
+            + (key_name,)
         )
         return self._send_keys(
             virtual_keys,

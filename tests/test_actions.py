@@ -10,6 +10,7 @@ from actions import (
     VK_ALT,
     VK_C,
     VK_CONTROL,
+    VK_F1,
     VK_LWIN,
     VK_N,
     VK_S,
@@ -66,20 +67,22 @@ class FixedShortcutTests(unittest.TestCase):
         self,
     ) -> None:
         result = self.actions.send_custom_shortcut(
-            ("shift", "ctrl", "alt"),
+            ("win", "shift", "ctrl", "alt"),
             "a",
         )
 
         self.assertTrue(result.success)
-        self.assertEqual(result.detail, "Ctrl+Alt+Shift+A")
+        self.assertEqual(result.detail, "Ctrl+Alt+Shift+Win+A")
         self.assertEqual(
             self.actions._user32.keybd_event.call_args_list,
             [
                 call(VK_CONTROL, 0, 0, 0),
                 call(VK_ALT, 0, 0, 0),
                 call(VK_SHIFT, 0, 0, 0),
+                call(VK_LWIN, 0, 0, 0),
                 call(ord("A"), 0, 0, 0),
                 call(ord("A"), 0, KEYEVENTF_KEYUP, 0),
+                call(VK_LWIN, 0, KEYEVENTF_KEYUP, 0),
                 call(VK_SHIFT, 0, KEYEVENTF_KEYUP, 0),
                 call(VK_ALT, 0, KEYEVENTF_KEYUP, 0),
                 call(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0),
@@ -101,18 +104,33 @@ class FixedShortcutTests(unittest.TestCase):
             ],
         )
 
+    def test_custom_shortcut_sends_function_key(self) -> None:
+        result = self.actions.send_custom_shortcut(("win",), "f12")
+
+        self.assertTrue(result.success)
+        self.assertEqual(result.detail, "Win+F12")
+        self.assertEqual(
+            self.actions._user32.keybd_event.call_args_list,
+            [
+                call(VK_LWIN, 0, 0, 0),
+                call(VK_F1 + 11, 0, 0, 0),
+                call(VK_F1 + 11, 0, KEYEVENTF_KEYUP, 0),
+                call(VK_LWIN, 0, KEYEVENTF_KEYUP, 0),
+            ],
+        )
+
     def test_custom_shortcut_rejects_invalid_modifier(self) -> None:
-        result = self.actions.send_custom_shortcut(("win",), "A")
+        result = self.actions.send_custom_shortcut(("meta",), "A")
 
         self.assertFalse(result.success)
         self.assertIn("修饰键", result.detail)
         self.actions._user32.keybd_event.assert_not_called()
 
-    def test_custom_shortcut_rejects_non_letter_key(self) -> None:
-        result = self.actions.send_custom_shortcut(("ctrl",), "F1")
+    def test_custom_shortcut_rejects_unsupported_key(self) -> None:
+        result = self.actions.send_custom_shortcut(("ctrl",), "F13")
 
         self.assertFalse(result.success)
-        self.assertIn("A-Z", result.detail)
+        self.assertIn("F1-F12", result.detail)
         self.actions._user32.keybd_event.assert_not_called()
 
 
