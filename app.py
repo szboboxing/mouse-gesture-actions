@@ -107,20 +107,28 @@ MOUSE_TEST_LABELS = {
     MouseControl.MIDDLE: "中键 / 滚轮按下",
     MouseControl.WHEEL_UP: "滚轮向上",
     MouseControl.WHEEL_DOWN: "滚轮向下",
-    MouseControl.XBUTTON1: "上一页 / XButton1",
-    MouseControl.XBUTTON2: "下一页 / XButton2",
+    MouseControl.XBUTTON1: "下一页 / XButton2",
+    MouseControl.XBUTTON2: "上一页 / XButton1",
 }
 SIDE_BUTTON_CONTROLS = (
     MouseControl.XBUTTON1,
     MouseControl.XBUTTON2,
 )
 SIDE_BUTTON_NAMES = {
-    MouseControl.XBUTTON1: "上一页侧键",
-    MouseControl.XBUTTON2: "下一页侧键",
+    MouseControl.XBUTTON1: "下一页侧键",
+    MouseControl.XBUTTON2: "上一页侧键",
+}
+MOUSE_TEST_DIAGRAM_LABELS = {
+    MouseControl.XBUTTON1: "X2\n下一页",
+    MouseControl.XBUTTON2: "X1\n上一页",
 }
 KEYBOARD_MAPPING_MOUSE_LABELS = {
-    "xbutton1": "X1 / 上一页侧键",
-    "xbutton2": "X2 / 下一页侧键",
+    "xbutton1": "X2 / 下一页侧键",
+    "xbutton2": "X1 / 上一页侧键",
+}
+KEYBOARD_MAPPING_MOUSE_SHORT_LABELS = {
+    "xbutton1": "X2",
+    "xbutton2": "X1",
 }
 KEYBOARD_MAPPING_MOUSE_VALUES = {
     label: value for value, label in KEYBOARD_MAPPING_MOUSE_LABELS.items()
@@ -248,7 +256,7 @@ class GestureCard(tk.Frame):
             canvas.create_text(
                 29,
                 28,
-                text="X1",
+                text="X2",
                 fill=accent,
                 font=("Segoe UI", 9, "bold"),
             )
@@ -1290,9 +1298,9 @@ class MouseGestureApp:
                 COLORS["orange"],
             )
 
-        for control, top, label in (
-            (MouseControl.XBUTTON2, 246, "X2\n下一页"),
-            (MouseControl.XBUTTON1, 320, "X1\n上一页"),
+        for control, top in (
+            (MouseControl.XBUTTON2, 246),
+            (MouseControl.XBUTTON1, 320),
         ):
             button = canvas.create_rectangle(
                 127,
@@ -1306,7 +1314,7 @@ class MouseGestureApp:
             text = canvas.create_text(
                 155,
                 top + 27,
-                text=label,
+                text=MOUSE_TEST_DIAGRAM_LABELS[control],
                 fill=COLORS["blue"],
                 font=("Microsoft YaHei UI", 8, "bold"),
             )
@@ -2066,9 +2074,9 @@ class MouseGestureApp:
 
     def _refresh_keyboard_mapping_ui(self, index: int) -> None:
         mapping = self._collect_keyboard_mappings()[index]
-        mouse_name = (
-            "X1" if mapping.mouse_button == "xbutton1" else "X2"
-        )
+        mouse_name = KEYBOARD_MAPPING_MOUSE_SHORT_LABELS[
+            mapping.mouse_button
+        ]
         state_text = "已启动" if mapping.enabled else "未启动"
         self.keyboard_mapping_preview_vars[index].set(
             f"{mouse_name} → {_keyboard_shortcut_text(mapping)} · "
@@ -2126,11 +2134,9 @@ class MouseGestureApp:
             )
 
         shortcut = _keyboard_shortcut_text(mapping)
-        mouse_name = (
-            "X1 / 上一页侧键"
-            if mapping.mouse_button == "xbutton1"
-            else "X2 / 下一页侧键"
-        )
+        mouse_name = KEYBOARD_MAPPING_MOUSE_LABELS[
+            mapping.mouse_button
+        ]
         state_text = "已启动" if enabling else "已停用"
         self._append_log(
             f"映射 {index + 1} {state_text}："
@@ -2398,11 +2404,9 @@ class MouseGestureApp:
         action_result: ActionResult,
         event_type: str,
     ) -> None:
-        mouse_name = (
-            "X1 / 上一页侧键"
-            if mapping.mouse_button == "xbutton1"
-            else "X2 / 下一页侧键"
-        )
+        mouse_name = KEYBOARD_MAPPING_MOUSE_LABELS[
+            mapping.mouse_button
+        ]
         text = (
             f"映射 {mapping_index + 1}：{mouse_name} → "
             f"{_keyboard_shortcut_text(mapping)}"
