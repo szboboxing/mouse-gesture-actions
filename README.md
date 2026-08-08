@@ -100,6 +100,7 @@ V1.0-V1.4 配置可继续读取；旧配置默认启用两枚侧键，已移除�
 
 ## 版本说明
 
+- [V1.6 版本说明](docs/releases/V1.6.md)
 - [V1.5 版本说明](docs/releases/V1.5.md)
 - [V1.4 版本说明](docs/releases/V1.4.md)
 - [V1.3 版本说明](docs/releases/V1.3.md)
@@ -157,7 +158,7 @@ python -m unittest discover -s tests -v
 构建产物：
 
 ```text
-dist\鼠标手势动作小工具_V1.5.exe
+dist\鼠标手势动作小工具_V1.6.exe
 ```
 
 ## 权限与限制
