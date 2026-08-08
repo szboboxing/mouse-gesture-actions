@@ -133,7 +133,7 @@ V1.0-V1.7 配置可继续读取；旧配置默认启用两枚截图侧键，并�
 
 ## 版本说明
 
-- [V1.8 版本说明（仅本地版本）](docs/releases/V1.8.md)
+- [V1.8 版本说明](docs/releases/V1.8.md)
 - [V1.7 版本说明（仅本地版本）](docs/releases/V1.7.md)
 - [V1.6 版本说明](docs/releases/V1.6.md)
 - [GitHub Releases](https://github.com/szboboxing/mouse-gesture-actions/releases)
