@@ -14,7 +14,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 class VersionMetadataTests(unittest.TestCase):
     def test_version_is_windows_compatible(self) -> None:
-        self.assertEqual(version_tuple(), (1, 9, 0, 0))
+        self.assertEqual(version_tuple(), (2, 0, 0, 0))
 
     def test_current_release_has_version_notes(self) -> None:
         notes_path = (
@@ -31,7 +31,7 @@ class ReleaseRetentionTests(unittest.TestCase):
     def test_only_latest_version_is_retained(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            for version in ("V1.7", "V1.8", "V1.9"):
+            for version in ("V1.8", "V1.9", "V2.0"):
                 (root / f"鼠标手势动作小工具_{version}.exe").write_bytes(b"test")
             unrelated = root / "other.exe"
             unrelated.write_bytes(b"keep")
@@ -41,13 +41,13 @@ class ReleaseRetentionTests(unittest.TestCase):
             self.assertEqual(
                 {path.name for path in deleted},
                 {
-                    "鼠标手势动作小工具_V1.7.exe",
                     "鼠标手势动作小工具_V1.8.exe",
+                    "鼠标手势动作小工具_V1.9.exe",
                 },
             )
-            self.assertFalse((root / "鼠标手势动作小工具_V1.7.exe").exists())
             self.assertFalse((root / "鼠标手势动作小工具_V1.8.exe").exists())
-            self.assertTrue((root / "鼠标手势动作小工具_V1.9.exe").exists())
+            self.assertFalse((root / "鼠标手势动作小工具_V1.9.exe").exists())
+            self.assertTrue((root / "鼠标手势动作小工具_V2.0.exe").exists())
             self.assertTrue(unrelated.exists())
 
 
