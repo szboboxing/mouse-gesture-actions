@@ -14,8 +14,11 @@ from typing import Callable
 WH_MOUSE_LL = 14
 WM_MOUSEMOVE = 0x0200
 WM_LBUTTONDOWN = 0x0201
+WM_LBUTTONUP = 0x0202
 WM_RBUTTONDOWN = 0x0204
 WM_RBUTTONUP = 0x0205
+WM_MBUTTONDOWN = 0x0207
+WM_MBUTTONUP = 0x0208
 WM_MOUSEWHEEL = 0x020A
 WM_XBUTTONDOWN = 0x020B
 WM_XBUTTONUP = 0x020C
@@ -51,6 +54,22 @@ class HeldMouseAction(str, Enum):
     COPY = "copy"
     ENHANCED_PASTE = "paste"
     SCREENSHOT = "screenshot"
+
+
+class MouseControl(str, Enum):
+    LEFT = "left"
+    RIGHT = "right"
+    MIDDLE = "middle"
+    WHEEL_UP = "wheel_up"
+    WHEEL_DOWN = "wheel_down"
+    XBUTTON1 = "xbutton1"
+    XBUTTON2 = "xbutton2"
+
+
+@dataclass(frozen=True, slots=True)
+class MouseTestEvent:
+    control: MouseControl
+    pressed: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -165,9 +184,12 @@ class GlobalRightButtonActionHook:
     def __init__(
         self,
         on_action: Callable[[HeldMouseAction], None],
+        on_test_event: Callable[[MouseTestEvent], None] | None = None,
     ) -> None:
         self._on_action = on_action
+        self._on_test_event = on_test_event
         self._enabled = True
+        self._test_mode = False
         self._lock = threading.Lock()
         self._state = RightHoldGestureState()
         self._metrics = MouseMetricsTracker()
@@ -200,6 +222,12 @@ class GlobalRightButtonActionHook:
             if not enabled:
                 self._state.cancel()
                 self._suppressed_xbuttons.clear()
+
+    def set_test_mode(self, enabled: bool) -> None:
+        with self._lock:
+            self._test_mode = enabled
+            self._state.cancel()
+            self._suppressed_xbuttons.clear()
 
     def snapshot_metrics(self) -> MouseMetrics:
         return self._metrics.snapshot()
@@ -335,6 +363,14 @@ class GlobalRightButtonActionHook:
             point = MousePoint(float(data.pt.x), float(data.pt.y), now)
             self._metrics.record(message, point)
 
+            test_event = _decode_mouse_test_event(message, data.mouseData)
+            with self._lock:
+                test_mode = self._test_mode
+            if test_mode:
+                if test_event is not None and self._on_test_event is not None:
+                    self._on_test_event(test_event)
+                return self._call_next(code, message, data_pointer)
+
             action: HeldMouseAction | None = None
             replay_right_click = False
             consume = False
@@ -419,6 +455,41 @@ def _high_word(value: int) -> int:
 def _signed_high_word(value: int) -> int:
     word = _high_word(value)
     return word - 0x10000 if word & 0x8000 else word
+
+
+def _decode_mouse_test_event(
+    message: int,
+    mouse_data: int,
+) -> MouseTestEvent | None:
+    simple_events = {
+        WM_LBUTTONDOWN: (MouseControl.LEFT, True),
+        WM_LBUTTONUP: (MouseControl.LEFT, False),
+        WM_RBUTTONDOWN: (MouseControl.RIGHT, True),
+        WM_RBUTTONUP: (MouseControl.RIGHT, False),
+        WM_MBUTTONDOWN: (MouseControl.MIDDLE, True),
+        WM_MBUTTONUP: (MouseControl.MIDDLE, False),
+    }
+    if message in simple_events:
+        control, pressed = simple_events[message]
+        return MouseTestEvent(control, pressed)
+
+    if message == WM_MOUSEWHEEL:
+        delta = _signed_high_word(mouse_data)
+        if delta > 0:
+            return MouseTestEvent(MouseControl.WHEEL_UP, True)
+        if delta < 0:
+            return MouseTestEvent(MouseControl.WHEEL_DOWN, True)
+        return None
+
+    if message in (WM_XBUTTONDOWN, WM_XBUTTONUP):
+        xbutton = _high_word(mouse_data)
+        control = {
+            XBUTTON1: MouseControl.XBUTTON1,
+            XBUTTON2: MouseControl.XBUTTON2,
+        }.get(xbutton)
+        if control is not None:
+            return MouseTestEvent(control, message == WM_XBUTTONDOWN)
+    return None
 
 
 def _point_distance(left: MousePoint, right: MousePoint) -> float:
