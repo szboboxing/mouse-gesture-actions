@@ -10,7 +10,7 @@ from tools.retain_latest_releases import retain_latest_releases
 
 class VersionMetadataTests(unittest.TestCase):
     def test_version_is_windows_compatible(self) -> None:
-        self.assertEqual(version_tuple(), (1, 0, 0, 0))
+        self.assertEqual(version_tuple(), (1, 1, 0, 0))
 
 
 class ReleaseRetentionTests(unittest.TestCase):

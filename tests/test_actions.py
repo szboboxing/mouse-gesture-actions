@@ -55,5 +55,29 @@ class FolderNamingTests(unittest.TestCase):
             self.assertTrue((root / "新建文件夹").is_dir())
 
 
+class QuickActionTests(unittest.TestCase):
+    @patch("actions.DisplayController")
+    @patch("actions.os.startfile")
+    def test_calculator_uses_windows_calculator(
+        self,
+        startfile,
+        _display_controller,
+    ) -> None:
+        result = SystemActions().open_calculator()
+
+        self.assertTrue(result.success)
+        startfile.assert_called_once_with("calc.exe")
+
+    @patch("actions.DisplayController")
+    def test_empty_custom_target_requests_configuration(
+        self,
+        _display_controller,
+    ) -> None:
+        result = SystemActions().open_custom_target("", "自定义 1")
+
+        self.assertFalse(result.success)
+        self.assertIn("右键", result.detail)
+
+
 if __name__ == "__main__":
     unittest.main()

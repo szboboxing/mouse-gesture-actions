@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import ctypes
+import os
 import re
 import time
+import webbrowser
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -10,6 +12,8 @@ import pythoncom
 import win32com.client
 import win32gui
 from win32com.shell import shell, shellcon
+
+from display_controls import DisplayController
 
 
 KEYEVENTF_KEYUP = 0x0002
@@ -55,6 +59,7 @@ class ActionResult:
 class SystemActions:
     def __init__(self) -> None:
         self._user32 = ctypes.windll.user32
+        self._display = DisplayController()
         self._user32.keybd_event.argtypes = (
             ctypes.c_ubyte,
             ctypes.c_ubyte,
@@ -79,6 +84,66 @@ class SystemActions:
         except OSError as exc:
             return ActionResult(False, f"{action_name}执行失败", str(exc))
 
+    def open_calculator(self) -> ActionResult:
+        return self._open_target("calc.exe", "计算器")
+
+    def open_browser(self) -> ActionResult:
+        try:
+            if not webbrowser.open("https://www.bing.com", new=2):
+                return ActionResult(False, "浏览器启动失败", "未找到默认浏览器")
+            return ActionResult(True, "已启动浏览器", "使用系统默认浏览器")
+        except (OSError, webbrowser.Error) as exc:
+            return ActionResult(False, "浏览器启动失败", str(exc))
+
+    def open_media_player(self) -> ActionResult:
+        errors: list[str] = []
+        for target in ("mswindowsmusic:", "wmplayer.exe"):
+            result = self._open_target(target, "媒体播放器")
+            if result.success:
+                return result
+            errors.append(result.detail)
+        return ActionResult(
+            False,
+            "媒体播放器启动失败",
+            "；".join(item for item in errors if item),
+        )
+
+    def adjust_brightness(self, direction: int) -> ActionResult:
+        result = self._display.adjust_brightness(direction)
+        if not result.success:
+            return ActionResult(False, "亮度调节失败", result.detail)
+        direction_text = "提高" if direction > 0 else "降低"
+        return ActionResult(
+            True,
+            f"已{direction_text}亮度至 {result.value}%",
+            result.detail,
+        )
+
+    def adjust_contrast(self, direction: int) -> ActionResult:
+        result = self._display.adjust_contrast(direction)
+        if not result.success:
+            return ActionResult(False, "对比度调节失败", result.detail)
+        direction_text = "提高" if direction > 0 else "降低"
+        return ActionResult(
+            True,
+            f"已{direction_text}对比度至 {result.value}%",
+            result.detail,
+        )
+
+    def open_custom_target(
+        self,
+        target: str,
+        action_name: str,
+    ) -> ActionResult:
+        target = os.path.expandvars(target.strip())
+        if not target:
+            return ActionResult(
+                False,
+                f"{action_name}尚未配置",
+                "请右键单击该按钮编辑名称和打开目标",
+            )
+        return self._open_target(target, action_name)
+
     def create_folder_in_active_directory(self) -> ActionResult:
         pythoncom.CoInitialize()
         try:
@@ -97,6 +162,14 @@ class SystemActions:
             return ActionResult(False, "新建文件夹失败", str(exc))
         finally:
             pythoncom.CoUninitialize()
+
+    @staticmethod
+    def _open_target(target: str, action_name: str) -> ActionResult:
+        try:
+            os.startfile(target)
+            return ActionResult(True, f"已启动{action_name}", target)
+        except OSError as exc:
+            return ActionResult(False, f"{action_name}启动失败", str(exc))
 
 
 def parse_shortcut(shortcut: str) -> tuple[int, ...]:

@@ -20,6 +20,10 @@ class AppSettings:
     double_swipe_interval_ms: int = 850
     launch_listening: bool = True
     minimize_on_start: bool = False
+    custom_button_1_name: str = "自定义 1"
+    custom_button_1_target: str = ""
+    custom_button_2_name: str = "自定义 2"
+    custom_button_2_target: str = ""
 
     @classmethod
     def from_mapping(cls, data: dict[str, Any]) -> "AppSettings":
@@ -31,6 +35,18 @@ class AppSettings:
         )
         if settings.sensitivity not in {"灵敏", "标准", "稳健"}:
             settings.sensitivity = "标准"
+        settings.custom_button_1_name = (
+            str(settings.custom_button_1_name).strip() or "自定义 1"
+        )[:12]
+        settings.custom_button_1_target = str(
+            settings.custom_button_1_target
+        ).strip()
+        settings.custom_button_2_name = (
+            str(settings.custom_button_2_name).strip() or "自定义 2"
+        )[:12]
+        settings.custom_button_2_target = str(
+            settings.custom_button_2_target
+        ).strip()
         return settings
 
     def save(self) -> None:

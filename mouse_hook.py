@@ -5,6 +5,7 @@ import math
 import queue
 import threading
 import time
+from dataclasses import dataclass
 from ctypes import wintypes
 from typing import Callable, Sequence
 
@@ -13,6 +14,7 @@ from gesture_recognizer import Point
 
 WH_MOUSE_LL = 14
 WM_MOUSEMOVE = 0x0200
+WM_LBUTTONDOWN = 0x0201
 WM_RBUTTONDOWN = 0x0204
 WM_RBUTTONUP = 0x0205
 WM_QUIT = 0x0012
@@ -40,6 +42,50 @@ LowLevelMouseProc = ctypes.WINFUNCTYPE(
 )
 
 
+@dataclass(frozen=True, slots=True)
+class MouseMetrics:
+    left_clicks: int = 0
+    right_clicks: int = 0
+    distance_pixels: float = 0.0
+
+
+class MouseMetricsTracker:
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._left_clicks = 0
+        self._right_clicks = 0
+        self._distance_pixels = 0.0
+        self._last_point: Point | None = None
+
+    def record(self, message: int, point: Point) -> None:
+        with self._lock:
+            if message == WM_LBUTTONDOWN:
+                self._left_clicks += 1
+            elif message == WM_RBUTTONDOWN:
+                self._right_clicks += 1
+            elif message == WM_MOUSEMOVE:
+                if self._last_point is not None:
+                    self._distance_pixels += _point_distance(
+                        self._last_point, point
+                    )
+                self._last_point = point
+
+    def snapshot(self) -> MouseMetrics:
+        with self._lock:
+            return MouseMetrics(
+                self._left_clicks,
+                self._right_clicks,
+                self._distance_pixels,
+            )
+
+    def reset(self) -> None:
+        with self._lock:
+            self._left_clicks = 0
+            self._right_clicks = 0
+            self._distance_pixels = 0.0
+            self._last_point = None
+
+
 class GlobalRightButtonGestureHook:
     """Capture right-button strokes while preserving normal right clicks."""
 
@@ -54,6 +100,7 @@ class GlobalRightButtonGestureHook:
         self._active = False
         self._points: list[Point] = []
         self._lock = threading.Lock()
+        self._metrics = MouseMetricsTracker()
         self._hook = None
         self._hook_thread: threading.Thread | None = None
         self._dispatch_thread: threading.Thread | None = None
@@ -82,6 +129,12 @@ class GlobalRightButtonGestureHook:
             if not enabled:
                 self._active = False
                 self._points.clear()
+
+    def snapshot_metrics(self) -> MouseMetrics:
+        return self._metrics.snapshot()
+
+    def reset_metrics(self) -> None:
+        self._metrics.reset()
 
     def start(self) -> bool:
         if self._hook_thread and self._hook_thread.is_alive():
@@ -204,13 +257,14 @@ class GlobalRightButtonGestureHook:
             if data.flags & LLMHF_INJECTED:
                 return self._call_next(code, message, data_pointer)
 
+            now = time.perf_counter()
+            point = Point(float(data.pt.x), float(data.pt.y), now)
+            self._metrics.record(message, point)
+
             with self._lock:
                 enabled = self._enabled
             if not enabled:
                 return self._call_next(code, message, data_pointer)
-
-            now = time.perf_counter()
-            point = Point(float(data.pt.x), float(data.pt.y), now)
 
             if message == WM_RBUTTONDOWN:
                 self._active = True
