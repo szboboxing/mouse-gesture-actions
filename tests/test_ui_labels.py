@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import Mock, patch
 
+from actions import ActionResult
 from app import (
+    GITHUB_PROJECT_NAME,
+    GITHUB_PROJECT_URL,
     KEYBOARD_MAPPING_MODIFIER_LABELS,
     KEYBOARD_MAPPING_MOUSE_LABELS,
     KEYBOARD_MAPPING_MOUSE_VALUES,
     MOUSE_TEST_DIAGRAM_LABELS,
     MOUSE_TEST_LABELS,
+    MouseGestureApp,
     SIDE_BUTTON_NAMES,
 )
 from mouse_hook import MouseControl
@@ -71,6 +76,53 @@ class SideButtonLabelTests(unittest.TestCase):
         self.assertEqual(
             KEYBOARD_MAPPING_MOUSE_VALUES["X1 / 上一页侧键"],
             "xbutton2",
+        )
+
+
+class GitHubLinkTests(unittest.TestCase):
+    def test_project_name_and_url_match_the_public_repository(self) -> None:
+        self.assertEqual(GITHUB_PROJECT_NAME, "鼠标手势动作小工具")
+        self.assertEqual(
+            GITHUB_PROJECT_URL,
+            "https://github.com/szboboxing/mouse-gesture-actions",
+        )
+
+    def test_clicking_link_opens_the_exact_project_url(self) -> None:
+        application = MouseGestureApp.__new__(MouseGestureApp)
+        application.actions = Mock()
+        application.root = Mock()
+        application.actions.open_custom_target.return_value = ActionResult(
+            True,
+            "已启动GitHub 项目",
+            GITHUB_PROJECT_URL,
+        )
+
+        result = application._open_github_project()
+
+        self.assertTrue(result.success)
+        application.actions.open_custom_target.assert_called_once_with(
+            GITHUB_PROJECT_URL,
+            "GitHub 项目",
+        )
+
+    @patch("app.messagebox.showerror")
+    def test_link_failure_is_reported(self, showerror: Mock) -> None:
+        application = MouseGestureApp.__new__(MouseGestureApp)
+        application.actions = Mock()
+        application.root = Mock()
+        application.actions.open_custom_target.return_value = ActionResult(
+            False,
+            "GitHub 项目启动失败",
+            "未找到默认浏览器",
+        )
+
+        result = application._open_github_project()
+
+        self.assertFalse(result.success)
+        showerror.assert_called_once_with(
+            "GitHub 链接打开失败",
+            "GitHub 项目启动失败\n\n未找到默认浏览器",
+            parent=application.root,
         )
 
 
