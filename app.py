@@ -73,6 +73,8 @@ CLOSE_CHOICE_CONFIRM = "confirm"
 CLOSE_CHOICE_MINIMIZE = "minimize"
 CLOSE_CHOICE_CANCEL = "cancel"
 CLOSE_DIALOG_BUTTON_LABELS = ("确认关闭", "最小化", "取消")
+GITHUB_PROJECT_NAME = APP_NAME
+GITHUB_PROJECT_URL = "https://github.com/szboboxing/mouse-gesture-actions"
 
 
 def _quick_tool_label(icon: str, label: str) -> str:
@@ -585,6 +587,52 @@ class MouseGestureApp:
             lambda: self._show_page("mouse_test"),
         )
 
+        github_box = tk.Frame(sidebar, bg=COLORS["nav"])
+        github_box.pack(side="bottom", fill="x", padx=17, pady=(0, 18))
+        tk.Frame(
+            github_box,
+            bg=COLORS["nav_soft"],
+            height=1,
+        ).pack(fill="x", pady=(0, 13))
+        tk.Label(
+            github_box,
+            text="GitHub 开源项目",
+            bg=COLORS["nav"],
+            fg=COLORS["nav_muted"],
+            font=("Microsoft YaHei UI", 8, "bold"),
+        ).pack(anchor="w")
+        tk.Label(
+            github_box,
+            text=GITHUB_PROJECT_NAME,
+            bg=COLORS["nav"],
+            fg=COLORS["nav_text"],
+            font=("Microsoft YaHei UI", 9, "bold"),
+        ).pack(anchor="w", pady=(4, 2))
+        self.github_link_label = tk.Label(
+            github_box,
+            text=GITHUB_PROJECT_URL,
+            bg=COLORS["nav"],
+            fg="#93C5FD",
+            activeforeground="#C7D2FE",
+            cursor="hand2",
+            font=("Segoe UI", 8, "underline"),
+            justify="left",
+            wraplength=220,
+        )
+        self.github_link_label.pack(anchor="w")
+        self.github_link_label.bind(
+            "<Button-1>",
+            lambda _event: self._open_github_project(),
+        )
+        self.github_link_label.bind(
+            "<Enter>",
+            lambda _event: self.github_link_label.configure(fg="#C7D2FE"),
+        )
+        self.github_link_label.bind(
+            "<Leave>",
+            lambda _event: self.github_link_label.configure(fg="#93C5FD"),
+        )
+
         help_box = tk.Frame(sidebar, bg=COLORS["nav"])
         help_box.pack(side="bottom", fill="x", padx=22, pady=25)
         tk.Label(
@@ -649,6 +697,20 @@ class MouseGestureApp:
         )
         button.pack(fill="x", pady=2)
         return button
+
+    def _open_github_project(self) -> ActionResult:
+        result = self.actions.open_custom_target(
+            GITHUB_PROJECT_URL,
+            "GitHub 项目",
+        )
+        if not result.success:
+            detail = f"\n\n{result.detail}" if result.detail else ""
+            messagebox.showerror(
+                "GitHub 链接打开失败",
+                f"{result.message}{detail}",
+                parent=self.root,
+            )
+        return result
 
     def _show_page(self, page_name: str) -> None:
         page = self.pages.get(page_name)
