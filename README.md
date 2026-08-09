@@ -147,7 +147,7 @@ V1.0-V1.9 配置可继续读取；旧配置默认启用两枚截图侧键，并�
 
 ## 版本说明
 
-- [V2.2 版本说明（仅本地版本）](docs/releases/V2.2.md)
+- [V2.2 版本说明](docs/releases/V2.2.md)
 - [V2.1 版本说明](docs/releases/V2.1.md)
 - [V2.0 版本说明（仅本地版本）](docs/releases/V2.0.md)
 - [V1.9 版本说明（仅本地版本）](docs/releases/V1.9.md)
