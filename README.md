@@ -12,6 +12,8 @@ V2.1 增加主窗口关闭保护：关闭窗口时可选择确认关闭、最小
 
 V2.2 在左侧栏目最下方显示 GitHub 项目名称和完整链接，单击后使用系统默认浏览器打开项目主页。
 
+V2.3 将“自定义键盘映射键”中映射 2 的“增强粘贴”复选框升级为整行大按钮，开启时绿色高亮、关闭时灰色显示，状态一目了然、更易点击；映射 1 保持原样，功能逻辑不变。
+
 下载最新单文件版本：
 
 <https://github.com/szboboxing/mouse-gesture-actions/releases/latest>
@@ -207,7 +209,7 @@ python -m unittest discover -s tests -v
 构建产物：
 
 ```text
-dist\鼠标手势动作小工具_V2.2.exe
+dist\鼠标手势动作小工具_V2.3.exe
 ```
 
 ## 权限与限制

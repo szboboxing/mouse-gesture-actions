@@ -397,6 +397,9 @@ class MouseGestureApp:
             tk.StringVar() for _mapping in self.settings.keyboard_mappings
         )
         self.keyboard_mapping_buttons: list[tk.Button] = []
+        self.keyboard_mapping_paste_buttons: list[tk.Button | None] = [
+            None for _mapping in self.settings.keyboard_mappings
+        ]
         self.encouragement_var = tk.StringVar()
 
         self._configure_window()
@@ -1564,15 +1567,35 @@ class MouseGestureApp:
                 ),
             )
 
-            ttk.Checkbutton(
-                controls,
-                text="增强粘贴",
-                variable=self.keyboard_mapping_enhanced_paste_vars[index],
-                command=lambda target=index: (
-                    self._on_keyboard_mapping_changed(target)
-                ),
-                style="Mapping.TCheckbutton",
-            ).pack(side="left", padx=(0, 3))
+            if index == 0:
+                ttk.Checkbutton(
+                    controls,
+                    text="增强粘贴",
+                    variable=self.keyboard_mapping_enhanced_paste_vars[
+                        index
+                    ],
+                    command=lambda target=index: (
+                        self._on_keyboard_mapping_changed(target)
+                    ),
+                    style="Mapping.TCheckbutton",
+                ).pack(side="left", padx=(0, 3))
+            else:
+                paste_row = tk.Frame(card, bg=COLORS["page"])
+                paste_row.pack(fill="x", pady=(7, 2))
+                paste_button = tk.Button(
+                    paste_row,
+                    command=lambda target=index: (
+                        self._toggle_keyboard_mapping_paste(target)
+                    ),
+                    relief="flat",
+                    bd=0,
+                    cursor="hand2",
+                    font=("Microsoft YaHei UI", 11, "bold"),
+                    padx=12,
+                    pady=8,
+                )
+                paste_button.pack(fill="x")
+                self.keyboard_mapping_paste_buttons[index] = paste_button
             self._refresh_keyboard_mapping_ui(index)
 
     def _build_quick_tools(self, page: tk.Frame) -> None:
@@ -2192,6 +2215,29 @@ class MouseGestureApp:
                 "#18865E" if mapping.enabled else "#405ED9"
             ),
         )
+        paste_button = self.keyboard_mapping_paste_buttons[index]
+        if paste_button is not None:
+            paste_active = (
+                self.keyboard_mapping_enhanced_paste_vars[index].get()
+            )
+            paste_button.configure(
+                text=(
+                    "增强粘贴：已开启" if paste_active else "增强粘贴：已关闭"
+                ),
+                bg=COLORS["green"] if paste_active else "#D8DDE6",
+                fg="#FFFFFF" if paste_active else "#5B6472",
+                activebackground=(
+                    "#18865E" if paste_active else "#C2C8D3"
+                ),
+                activeforeground=(
+                    "#FFFFFF" if paste_active else "#3F4754"
+                ),
+            )
+
+    def _toggle_keyboard_mapping_paste(self, index: int) -> None:
+        paste_var = self.keyboard_mapping_enhanced_paste_vars[index]
+        paste_var.set(not paste_var.get())
+        self._on_keyboard_mapping_changed(index)
 
     def _on_keyboard_mapping_changed(self, index: int) -> None:
         conflict = self._disable_conflicting_keyboard_mapping(index)
