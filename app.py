@@ -15,6 +15,7 @@ from tkinter import messagebox, simpledialog, ttk
 from typing import Callable
 
 from actions import ActionResult, SystemActions
+from help_browser import open_help_browser
 from mouse_hook import (
     GlobalRightButtonActionHook,
     HeldMouseAction,
@@ -589,6 +590,11 @@ class MouseGestureApp:
             "鼠标按键测试",
             lambda: self._show_page("mouse_test"),
         )
+        self._nav_button(
+            nav_box,
+            "❓ 帮助说明",
+            self._open_help,
+        )
 
         github_box = tk.Frame(sidebar, bg=COLORS["nav"])
         github_box.pack(side="bottom", fill="x", padx=17, pady=(0, 18))
@@ -700,6 +706,10 @@ class MouseGestureApp:
         )
         button.pack(fill="x", pady=2)
         return button
+
+    def _open_help(self) -> None:
+        """打开帮助中心浏览窗口（同一主窗口只保留一个）。"""
+        open_help_browser(self.root)
 
     def _open_github_project(self) -> ActionResult:
         result = self.actions.open_custom_target(
