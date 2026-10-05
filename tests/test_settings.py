@@ -50,21 +50,41 @@ class SettingsTests(unittest.TestCase):
             settings.screenshot_side_buttons,
             ("xbutton1", "xbutton2"),
         )
-        self.assertEqual(settings.custom_button_1_name, "自定义 1")
-        self.assertEqual(settings.custom_button_2_name, "自定义 2")
-        self.assertEqual(settings.custom_button_1_target, "")
-        self.assertEqual(settings.custom_button_2_target, "")
+        self.assertEqual(settings.custom_button_name, "自定义")
+        self.assertEqual(settings.custom_button_target, "")
 
     def test_custom_button_names_are_trimmed_and_limited(self) -> None:
         settings = AppSettings.from_mapping(
             {
-                "custom_button_1_name": "  工作资料快速打开按钮超长名称  ",
-                "custom_button_1_target": "  D:\\work  ",
+                "custom_button_name": "  工作资料快速打开按钮超长名称  ",
+                "custom_button_target": "  D:\\work  ",
             }
         )
 
-        self.assertEqual(settings.custom_button_1_name, "工作资料快速打开按钮超长")
-        self.assertEqual(settings.custom_button_1_target, "D:\\work")
+        self.assertEqual(settings.custom_button_name, "工作资料快速打开按钮超长")
+        self.assertEqual(settings.custom_button_target, "D:\\work")
+
+    def test_legacy_custom_button_2_fields_are_migrated(self) -> None:
+        settings = AppSettings.from_mapping(
+            {
+                "custom_button_2_name": "我的工作",
+                "custom_button_2_target": "D:\\work",
+            }
+        )
+
+        self.assertEqual(settings.custom_button_name, "我的工作")
+        self.assertEqual(settings.custom_button_target, "D:\\work")
+
+    def test_legacy_custom_button_1_fields_are_ignored(self) -> None:
+        settings = AppSettings.from_mapping(
+            {
+                "custom_button_1_name": "旧按钮1",
+                "custom_button_1_target": "C:\\old",
+            }
+        )
+
+        self.assertEqual(settings.custom_button_name, "自定义")
+        self.assertEqual(settings.custom_button_target, "")
 
     def test_confirmed_screenshot_side_buttons_are_normalized(self) -> None:
         settings = AppSettings.from_mapping(

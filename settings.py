@@ -104,10 +104,8 @@ class AppSettings:
     launch_listening: bool = True
     minimize_on_start: bool = False
     screenshot_side_buttons: tuple[str, ...] = DEFAULT_SCREENSHOT_SIDE_BUTTONS
-    custom_button_1_name: str = "自定义 1"
-    custom_button_1_target: str = ""
-    custom_button_2_name: str = "自定义 2"
-    custom_button_2_target: str = ""
+    custom_button_name: str = "自定义"
+    custom_button_target: str = ""
     keyboard_mappings: tuple[KeyboardMappingSettings, ...] = field(
         default_factory=default_keyboard_mappings
     )
@@ -132,17 +130,23 @@ class AppSettings:
         )
         if not settings.screenshot_side_buttons:
             settings.screenshot_side_buttons = DEFAULT_SCREENSHOT_SIDE_BUTTONS
-        settings.custom_button_1_name = (
-            str(settings.custom_button_1_name).strip() or "自定义 1"
+        # 兼容旧版本：custom_button_2_name/target 迁移到通用 custom_button_*
+        legacy_name = data.get("custom_button_2_name")
+        legacy_target = data.get("custom_button_2_target")
+        if (
+            settings.custom_button_name == "自定义"
+            and not settings.custom_button_target
+            and isinstance(legacy_name, str)
+            and legacy_name.strip()
+        ):
+            settings.custom_button_name = legacy_name
+            if isinstance(legacy_target, str):
+                settings.custom_button_target = legacy_target
+        settings.custom_button_name = (
+            str(settings.custom_button_name).strip() or "自定义"
         )[:12]
-        settings.custom_button_1_target = str(
-            settings.custom_button_1_target
-        ).strip()
-        settings.custom_button_2_name = (
-            str(settings.custom_button_2_name).strip() or "自定义 2"
-        )[:12]
-        settings.custom_button_2_target = str(
-            settings.custom_button_2_target
+        settings.custom_button_target = str(
+            settings.custom_button_target
         ).strip()
         settings.keyboard_mappings = _normalize_keyboard_mappings(
             raw_keyboard_mappings

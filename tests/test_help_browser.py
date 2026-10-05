@@ -118,7 +118,7 @@ class HelpBrowserNavigationTests(unittest.TestCase):
 
     def test_title_contains_version_tag(self) -> None:
         self.assertIn(VERSION_TAG, self.browser.title())
-        self.assertEqual(APP_VERSION, "2.4")
+        self.assertEqual(APP_VERSION, "2.5")
 
 
 if __name__ == "__main__":

@@ -68,7 +68,8 @@ COLORS = {
     "red_soft": "#FDECEF",
 }
 
-CUSTOM_TOOL_ICONS = ("◇", "◆")
+CUSTOM_TOOL_ICON = "◇"
+MOUSE_POINTER_SIZE_ICON = "🖱"
 SHUTDOWN_WATCHDOG_SECONDS = 6.0
 CLOSE_CHOICE_CONFIRM = "confirm"
 CLOSE_CHOICE_MINIMIZE = "minimize"
@@ -107,6 +108,7 @@ USAGE_LABELS = (
     ("brightness", "亮度调节"),
     ("contrast", "对比度调节"),
     ("keyboard_mapping", "键盘映射"),
+    ("mouse_pointer_size", "鼠标指针大小"),
     ("custom", "自定义功能"),
 )
 
@@ -347,18 +349,14 @@ class MouseGestureApp:
         self.side_button_confirm_var = tk.StringVar(
             value="侧键无反应时，请重新确认并保存检测结果。"
         )
-        self.custom_name_vars = (
-            tk.StringVar(value=self.settings.custom_button_1_name),
-            tk.StringVar(value=self.settings.custom_button_2_name),
+        self.custom_name_var = tk.StringVar(
+            value=self.settings.custom_button_name
         )
-        self.custom_quick_label_vars = tuple(
-            tk.StringVar(
-                value=_quick_tool_label(
-                    CUSTOM_TOOL_ICONS[index],
-                    name_var.get(),
-                )
+        self.custom_quick_label_var = tk.StringVar(
+            value=_quick_tool_label(
+                CUSTOM_TOOL_ICON,
+                self.custom_name_var.get(),
             )
-            for index, name_var in enumerate(self.custom_name_vars)
         )
         self.keyboard_mapping_mouse_vars = tuple(
             tk.StringVar(
@@ -1700,20 +1698,31 @@ class MouseGestureApp:
             icon="↻",
             hover_color=COLORS["red_soft"],
         )
-        for offset in range(2):
-            button = self._quick_button(
-                buttons,
-                6 + offset,
-                "",
-                lambda index=offset: self._run_custom_action(index),
-                COLORS["blue"],
-                textvariable=self.custom_quick_label_vars[offset],
-                hover_color=COLORS["blue_soft"],
-            )
-            button.bind(
-                "<Button-3>",
-                lambda _event, index=offset: self._edit_custom_button(index),
-            )
+        self._quick_button(
+            buttons,
+            6,
+            "鼠标指针大小",
+            lambda: self._run_quick_action(
+                "mouse_pointer_size",
+                self.actions.open_mouse_pointer_size_settings,
+            ),
+            COLORS["green"],
+            icon=MOUSE_POINTER_SIZE_ICON,
+            hover_color=COLORS["green_soft"],
+        )
+        button = self._quick_button(
+            buttons,
+            7,
+            "",
+            self._run_custom_action,
+            COLORS["blue"],
+            textvariable=self.custom_quick_label_var,
+            hover_color=COLORS["blue_soft"],
+        )
+        button.bind(
+            "<Button-3>",
+            lambda _event: self._edit_custom_button(),
+        )
 
     @staticmethod
     def _quick_button(
@@ -2008,28 +2017,20 @@ class MouseGestureApp:
         )
         self._run_quick_action(control, lambda: action(direction))
 
-    def _run_custom_action(self, index: int) -> None:
-        name = self.custom_name_vars[index].get().strip()
-        target = (
-            self.settings.custom_button_1_target
-            if index == 0
-            else self.settings.custom_button_2_target
-        )
+    def _run_custom_action(self) -> None:
+        name = self.custom_name_var.get().strip()
+        target = self.settings.custom_button_target
         if not target:
-            self._edit_custom_button(index)
+            self._edit_custom_button()
             return
         self._run_quick_action(
             "custom",
             lambda: self.actions.open_custom_target(target, name),
         )
 
-    def _edit_custom_button(self, index: int) -> None:
-        current_name = self.custom_name_vars[index].get()
-        current_target = (
-            self.settings.custom_button_1_target
-            if index == 0
-            else self.settings.custom_button_2_target
-        )
+    def _edit_custom_button(self) -> None:
+        current_name = self.custom_name_var.get()
+        current_target = self.settings.custom_button_target
         name = simpledialog.askstring(
             "编辑自定义按钮",
             "按钮名称（最多 12 个字符）：",
@@ -2038,7 +2039,7 @@ class MouseGestureApp:
         )
         if name is None:
             return
-        name = name.strip()[:12] or f"自定义 {index + 1}"
+        name = name.strip()[:12] or "自定义"
         target = simpledialog.askstring(
             "编辑自定义按钮",
             "要打开的程序、文件、文件夹或网址：",
@@ -2049,20 +2050,16 @@ class MouseGestureApp:
             return
         target = target.strip()
 
-        if index == 0:
-            self.settings.custom_button_1_name = name
-            self.settings.custom_button_1_target = target
-        else:
-            self.settings.custom_button_2_name = name
-            self.settings.custom_button_2_target = target
+        self.settings.custom_button_name = name
+        self.settings.custom_button_target = target
         try:
             self.settings.save()
         except OSError as exc:
             messagebox.showerror("保存失败", str(exc))
             return
-        self.custom_name_vars[index].set(name)
-        self.custom_quick_label_vars[index].set(
-            _quick_tool_label(CUSTOM_TOOL_ICONS[index], name)
+        self.custom_name_var.set(name)
+        self.custom_quick_label_var.set(
+            _quick_tool_label(CUSTOM_TOOL_ICON, name)
         )
         self._append_log(f"已更新自定义按钮：{name}", "success")
         self._show_toast("自定义按钮已保存", COLORS["green"])
@@ -2310,10 +2307,8 @@ class MouseGestureApp:
             launch_listening=self.launch_var.get(),
             minimize_on_start=self.minimize_var.get(),
             screenshot_side_buttons=self.settings.screenshot_side_buttons,
-            custom_button_1_name=self.settings.custom_button_1_name,
-            custom_button_1_target=self.settings.custom_button_1_target,
-            custom_button_2_name=self.settings.custom_button_2_name,
-            custom_button_2_target=self.settings.custom_button_2_target,
+            custom_button_name=self.settings.custom_button_name,
+            custom_button_target=self.settings.custom_button_target,
             keyboard_mappings=self._collect_keyboard_mappings(),
         )
         try:
