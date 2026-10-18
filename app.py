@@ -11,7 +11,7 @@ from collections import Counter
 from ctypes import wintypes
 from datetime import datetime
 from pathlib import Path
-from tkinter import messagebox, simpledialog, ttk
+from tkinter import filedialog, messagebox, simpledialog, ttk
 from typing import Callable
 
 from actions import ActionResult, SystemActions
@@ -23,7 +23,16 @@ from mouse_hook import (
     MouseControl,
     MouseTestEvent,
 )
-from radial_menu import DEFAULT_RADIAL_ITEMS, RadialItem, RadialMenu
+from radial_menu import (
+    COLORS as RADIAL_COLORS,
+    DEFAULT_RADIAL_ITEMS,
+    RadialItem,
+    RadialMenuPanel,
+)
+from clipboard_history import (
+    ClipboardHistoryPanel,
+    ClipboardHistoryStore,
+)
 from settings import (
     KEYBOARD_MAPPING_ACTION_ENHANCED_PASTE,
     KEYBOARD_MAPPING_ACTION_SHORTCUT,
@@ -111,6 +120,7 @@ USAGE_LABELS = (
     ("contrast", "对比度调节"),
     ("keyboard_mapping", "键盘映射"),
     ("mouse_pointer_size", "鼠标指针大小"),
+    ("ai_tool", "AI 工具"),
     ("custom", "自定义功能"),
 )
 
@@ -327,7 +337,13 @@ class MouseGestureApp:
         self._shutdown_watchdog: threading.Timer | None = None
         self._close_dialog: tk.Toplevel | None = None
         self._close_cancel_button: tk.Button | None = None
-        self.radial_menu: RadialMenu | None = None
+        self.radial_panel: RadialMenuPanel | None = None
+        self.clipboard_panel: ClipboardHistoryPanel | None = None
+        self.clipboard_store = ClipboardHistoryStore()
+        self._view_container: tk.Frame | None = None
+        self._main_view: tk.Frame | None = None
+        self._radial_view: tk.Frame | None = None
+        self._active_view: str = "radial"
 
         self.launch_var = tk.BooleanVar(value=self.settings.launch_listening)
         self.minimize_var = tk.BooleanVar(
@@ -363,6 +379,9 @@ class MouseGestureApp:
                 CUSTOM_TOOL_ICON,
                 self.custom_name_var.get(),
             )
+        )
+        self.ai_tool_var = tk.StringVar(
+            value=self.settings.ai_tool_target
         )
         self.keyboard_mapping_mouse_vars = tuple(
             tk.StringVar(
@@ -414,18 +433,17 @@ class MouseGestureApp:
         self.root.after(60, self._poll_ui_events)
         self.root.after(300, self._refresh_metrics)
         self.root.after(150, self._start_hook)
-        self.root.after(400, self._show_radial_menu)
 
     def _configure_window(self) -> None:
         self.root.title(f"{APP_NAME} {VERSION_TAG}")
         screen_width = self.root.winfo_screenwidth()
         screen_height = self.root.winfo_screenheight()
-        width = min(1440, max(1180, screen_width - 80))
-        height = min(900, max(700, screen_height - 90))
-        width = min(width, screen_width)
-        height = min(height, screen_height)
-        self.root.geometry(f"{width}x{height}")
-        self.root.minsize(min(1120, screen_width), min(680, screen_height))
+        self._full_width = min(1440, max(1180, screen_width - 80))
+        self._full_height = min(900, max(700, screen_height - 90))
+        self._full_width = min(self._full_width, screen_width)
+        self._full_height = min(self._full_height, screen_height)
+        self._radial_width = min(960, screen_width - 40)
+        self._radial_height = min(960, screen_height - 80)
         self.root.configure(bg=COLORS["page"])
         self.root.option_add("*Font", ("Microsoft YaHei UI", 9))
         icon_path = resource_path("assets/mouse_gesture.ico")
@@ -435,8 +453,24 @@ class MouseGestureApp:
             except tk.TclError:
                 pass
         self.root.update_idletasks()
-        x = max(0, (screen_width - width) // 2)
-        y = max(0, (screen_height - height) // 2)
+        self._apply_radial_geometry()
+
+    def _apply_radial_geometry(self) -> None:
+        width = self._radial_width
+        height = self._radial_height
+        x = max(0, (self.root.winfo_screenwidth() - width) // 2)
+        y = max(0, (self.root.winfo_screenheight() - height) // 2)
+        self.root.geometry(f"{width}x{height}+{x}+{y}")
+        self.root.minsize(min(width, 820), min(height, 640))
+        self.root.resizable(True, True)
+
+    def _apply_full_geometry(self) -> None:
+        width = self._full_width
+        height = self._full_height
+        self.root.minsize(min(1120, self.root.winfo_screenwidth()),
+                           min(680, self.root.winfo_screenheight()))
+        x = max(0, (self.root.winfo_screenwidth() - width) // 2)
+        y = max(0, (self.root.winfo_screenheight() - height) // 2)
         self.root.geometry(f"{width}x{height}+{x}+{y}")
 
     def _configure_styles(self) -> None:
@@ -488,7 +522,86 @@ class MouseGestureApp:
         )
 
     def _build_layout(self) -> None:
-        sidebar = tk.Frame(self.root, bg=COLORS["nav"], width=264)
+        self._view_container = tk.Frame(self.root, bg=COLORS["page"])
+        self._view_container.pack(fill="both", expand=True)
+
+        self._main_view = tk.Frame(
+            self._view_container, bg=COLORS["page"]
+        )
+        self._radial_view = tk.Frame(
+            self._view_container, bg=RADIAL_COLORS["bg"]
+        )
+
+        self._build_main_view(self._main_view)
+        self._build_radial_view(self._radial_view)
+        if self.settings.show_radial_menu_on_start:
+            self._show_radial_view()
+        else:
+            self._show_main_view()
+
+    def _build_radial_view(self, parent: tk.Frame) -> None:
+        items = self._get_radial_menu_items()
+
+        self.clipboard_panel = ClipboardHistoryPanel(
+            parent,
+            store=self.clipboard_store,
+            on_status=self._on_clipboard_status,
+            on_toggle=self._on_clipboard_toggle,
+        )
+        self.clipboard_panel.pack(side="bottom", fill="x")
+
+        self.radial_panel = RadialMenuPanel(
+            parent,
+            on_item_selected=self._on_radial_item_selected,
+            on_settings=self._show_main_view,
+            items=items,
+        )
+        self.radial_panel.pack(fill="both", expand=True)
+        self.radial_panel.set_status("正在初始化", RADIAL_COLORS["status_orange"])
+        self._refresh_radial_paste_mode()
+
+        # Sync the clipboard recorder with the persisted preference.
+        self.clipboard_panel.set_enabled(self.settings.clipboard_history_enabled)
+
+    def _on_clipboard_toggle(self, enabled: bool) -> None:
+        self.settings.clipboard_history_enabled = bool(enabled)
+        try:
+            self.settings.save()
+        except OSError:
+            pass
+
+    def _on_clipboard_status(self, text: str) -> None:
+        self._append_log(text, "info")
+        self._show_toast(text, RADIAL_COLORS["hover"])
+
+    def _refresh_radial_paste_mode(self) -> None:
+        if self.radial_panel is None:
+            return
+        index = self._enhanced_paste_toggle_index()
+        if index is None:
+            self.radial_panel.set_paste_mode(None)
+            return
+        self.radial_panel.set_paste_mode(
+            self.keyboard_mapping_enhanced_paste_vars[index].get()
+        )
+
+    def _show_radial_view(self) -> None:
+        self._active_view = "radial"
+        self._main_view.pack_forget()
+        self._radial_view.pack(fill="both", expand=True)
+        self._apply_radial_geometry()
+        if self.radial_panel is not None:
+            self.radial_panel.set_items(self._get_radial_menu_items())
+            self._refresh_radial_paste_mode()
+
+    def _show_main_view(self) -> None:
+        self._active_view = "main"
+        self._radial_view.pack_forget()
+        self._main_view.pack(fill="both", expand=True)
+        self._apply_full_geometry()
+
+    def _build_main_view(self, root: tk.Frame) -> None:
+        sidebar = tk.Frame(root, bg=COLORS["nav"], width=264)
         sidebar.pack(side="left", fill="y")
         sidebar.pack_propagate(False)
 
@@ -574,7 +687,24 @@ class MouseGestureApp:
             padx=14,
             pady=10,
         )
-        self.toggle_button.pack(fill="x", padx=17, pady=(0, 22))
+        self.toggle_button.pack(fill="x", padx=17, pady=(0, 12))
+
+        back_button = tk.Button(
+            sidebar,
+            text="⟲  返回轮盘",
+            command=self._show_radial_view,
+            bg=COLORS["blue"],
+            fg="#FFFFFF",
+            activebackground=COLORS["nav"],
+            activeforeground="#FFFFFF",
+            relief="flat",
+            bd=0,
+            cursor="hand2",
+            font=("Microsoft YaHei UI", 12, "bold"),
+            padx=16,
+            pady=13,
+        )
+        back_button.pack(fill="x", padx=17, pady=(0, 22))
 
         tk.Label(
             sidebar,
@@ -669,7 +799,7 @@ class MouseGestureApp:
                 font=("Microsoft YaHei UI", 9),
             ).pack(anchor="w", pady=3)
 
-        page_container = tk.Frame(self.root, bg=COLORS["page"])
+        page_container = tk.Frame(root, bg=COLORS["page"])
         page_container.pack(side="left", fill="both", expand=True)
         page_container.rowconfigure(0, weight=1)
         page_container.columnconfigure(0, weight=1)
@@ -1737,6 +1867,59 @@ class MouseGestureApp:
             lambda _event: self._edit_custom_button(),
         )
 
+        # AI 工具：轮盘「AI 工具」按钮要打开的程序/路径，可在此配置。
+        ai_row = tk.Frame(panel, bg=COLORS["card"])
+        ai_row.pack(fill="x", pady=(9, 0))
+        tk.Label(
+            ai_row,
+            text="AI 工具",
+            bg=COLORS["card"],
+            fg=COLORS["text"],
+            font=("Microsoft YaHei UI", 9, "bold"),
+        ).pack(side="left")
+        self.ai_tool_entry = tk.Entry(
+            ai_row,
+            textvariable=self.ai_tool_var,
+            bg=COLORS["page"],
+            fg=COLORS["text"],
+            insertbackground=COLORS["text"],
+            relief="flat",
+            font=("Microsoft YaHei UI", 9),
+        )
+        self.ai_tool_entry.pack(
+            side="left", fill="x", expand=True, padx=(8, 8), ipady=3
+        )
+        tk.Button(
+            ai_row,
+            text="浏览…",
+            command=self._browse_ai_tool,
+            bg=COLORS["nav_soft"],
+            fg=COLORS["nav_text"],
+            activebackground=COLORS["nav"],
+            activeforeground=COLORS["nav_text"],
+            relief="flat",
+            bd=0,
+            cursor="hand2",
+            font=("Microsoft YaHei UI", 9, "bold"),
+            padx=10,
+            pady=3,
+        ).pack(side="left", padx=(0, 6))
+        tk.Button(
+            ai_row,
+            text="保存",
+            command=self._save_ai_tool_target,
+            bg=COLORS["blue"],
+            fg="#FFFFFF",
+            activebackground=COLORS["blue_soft"],
+            activeforeground="#FFFFFF",
+            relief="flat",
+            bd=0,
+            cursor="hand2",
+            font=("Microsoft YaHei UI", 9, "bold"),
+            padx=12,
+            pady=3,
+        ).pack(side="left")
+
     @staticmethod
     def _quick_button(
         parent: tk.Frame,
@@ -1951,6 +2134,7 @@ class MouseGestureApp:
         if self.active_page == "mouse_test":
             self.status_var.set("按键测试中")
             self._set_status_dot(COLORS["blue"])
+            self._sync_radial_status("按键测试中", RADIAL_COLORS["hover"])
             self.toggle_button.configure(
                 text="测试期间暂停组合",
                 bg=COLORS["nav_soft"],
@@ -1964,6 +2148,7 @@ class MouseGestureApp:
         if self.listening:
             self.status_var.set("正在监听")
             self._set_status_dot(COLORS["green"])
+            self._sync_radial_status("已开启 · 正在监听", RADIAL_COLORS["status_green"])
             self.toggle_button.configure(
                 text="暂停组合监听",
                 bg=COLORS["blue"],
@@ -1972,11 +2157,16 @@ class MouseGestureApp:
         else:
             self.status_var.set("监听已暂停")
             self._set_status_dot(COLORS["orange"])
+            self._sync_radial_status("监听已暂停", RADIAL_COLORS["status_orange"])
             self.toggle_button.configure(
                 text="开始组合监听",
                 bg=COLORS["orange"],
                 activebackground="#C9761E",
             )
+
+    def _sync_radial_status(self, text: str, color: str) -> None:
+        if self.radial_panel is not None:
+            self.radial_panel.set_status(text, color)
 
     def _set_status_dot(self, color: str) -> None:
         self.status_dot.itemconfigure(self.status_dot_id, fill=color)
@@ -2076,6 +2266,34 @@ class MouseGestureApp:
         )
         self._append_log(f"已更新自定义按钮：{name}", "success")
         self._show_toast("自定义按钮已保存", COLORS["green"])
+
+    def _browse_ai_tool(self) -> None:
+        path = filedialog.askopenfilename(
+            title="选择 AI 工具程序",
+            parent=self.root,
+            filetypes=(
+                ("可执行程序", "*.exe *.bat *.cmd"),
+                ("所有文件", "*.*"),
+            ),
+        )
+        if path:
+            self.ai_tool_var.set(path)
+
+    def _save_ai_tool_target(self) -> None:
+        target = self.ai_tool_var.get().strip()
+        self.settings.ai_tool_target = target
+        self.ai_tool_var.set(target)
+        try:
+            self.settings.save()
+        except OSError as exc:
+            messagebox.showerror("保存失败", str(exc))
+            return
+        if target:
+            self._append_log(f"已保存 AI 工具：{target}", "success")
+            self._show_toast("AI 工具已保存", COLORS["green"])
+        else:
+            self._append_log("已清空 AI 工具配置", "info")
+            self._show_toast("AI 工具已清空", COLORS["blue"])
 
     def _display_quick_result(
         self,
@@ -2258,6 +2476,37 @@ class MouseGestureApp:
         paste_var = self.keyboard_mapping_enhanced_paste_vars[index]
         paste_var.set(not paste_var.get())
         self._on_keyboard_mapping_changed(index)
+
+    def _enhanced_paste_toggle_index(self) -> int | None:
+        """Index of the mapping that owns the big 增强粘贴 toggle button."""
+        for index, button in enumerate(self.keyboard_mapping_paste_buttons):
+            if button is not None:
+                return index
+        return None
+
+    def _set_enhanced_paste_mode(self, enhanced: bool) -> ActionResult:
+        """Toggle the big 增强粘贴 switch state and persist it.
+
+        This mirrors the settings-page big button: green when enhanced
+        paste is on, grey ("已关闭") when it is off.
+        """
+        index = self._enhanced_paste_toggle_index()
+        if index is None:
+            return ActionResult(
+                False,
+                "未找到增强粘贴开关",
+                "当前没有可切换的键盘映射。",
+            )
+        self.keyboard_mapping_enhanced_paste_vars[index].set(enhanced)
+        self._on_keyboard_mapping_changed(index)
+        self._refresh_radial_paste_mode()
+        state = "已开启" if enhanced else "已关闭"
+        detail = (
+            "侧键按下时将新建文件夹并粘贴剪贴板内容。"
+            if enhanced
+            else "侧键按下时将执行普通粘贴。"
+        )
+        return ActionResult(True, f"增强粘贴{state}", detail)
 
     def _on_keyboard_mapping_changed(self, index: int) -> None:
         conflict = self._disable_conflicting_keyboard_mapping(index)
@@ -2679,19 +2928,10 @@ class MouseGestureApp:
         self.toast_after_id = None
 
     def _show_radial_menu(self) -> None:
-        """Display the startup radial menu overlay."""
-        if not self.settings.show_radial_menu_on_start:
-            return
-        if self.radial_menu is not None and self.radial_menu._is_active:
-            return
-        items = self._get_radial_menu_items()
-        self.radial_menu = RadialMenu(
-            parent=self.root,
-            on_item_selected=self._on_radial_item_selected,
-            on_close=self._on_radial_menu_close,
-            items=items,
-        )
-        self.radial_menu.show()
+        """Refresh and display the primary radial menu view."""
+        if self.radial_panel is not None:
+            self.radial_panel.set_items(self._get_radial_menu_items())
+        self._show_radial_view()
 
     def _get_radial_menu_items(self) -> tuple[RadialItem, ...]:
         """Convert settings to RadialItem tuples."""
@@ -2711,14 +2951,54 @@ class MouseGestureApp:
             )
         return tuple(items) if items else DEFAULT_RADIAL_ITEMS
 
-    def _on_radial_item_selected(self, item: RadialItem) -> None:
-        """Execute the action for a selected radial menu item."""
+    def _on_radial_item_selected(
+        self, item: RadialItem, right: bool = False
+    ) -> None:
+        """Execute the action for a selected radial menu item.
+
+        ``right`` marks a right-click on the tile — used by the brightness
+        and contrast tiles to decrease instead of increase (左加右减).
+        """
+        usage_key: str | None = None
         if item.action_type == "shortcut":
             result = self.actions.send_custom_shortcut(
                 item.modifiers, item.key
             )
+        elif item.action_type == "set_paste_enhanced":
+            result = self._set_enhanced_paste_mode(True)
+        elif item.action_type == "set_paste_normal":
+            result = self._set_enhanced_paste_mode(False)
+        elif item.action_type == "calculator":
+            usage_key = "calculator"
+            result = self.actions.open_calculator()
+        elif item.action_type == "browser":
+            usage_key = "browser"
+            result = self.actions.open_browser()
+        elif item.action_type == "mouse_pointer_size":
+            usage_key = "mouse_pointer_size"
+            result = self.actions.open_mouse_pointer_size_settings()
+        elif item.action_type == "brightness":
+            usage_key = "brightness"
+            result = self.actions.adjust_brightness(-1 if right else 1)
+        elif item.action_type == "contrast":
+            usage_key = "contrast"
+            result = self.actions.adjust_contrast(-1 if right else 1)
+        elif item.action_type == "ai_tool":
+            usage_key = "ai_tool"
+            target = self.settings.ai_tool_target
+            if target:
+                result = self.actions.open_custom_target(
+                    target, item.label
+                )
+            else:
+                result = ActionResult(
+                    False,
+                    "AI 工具尚未配置",
+                    "请在设置页的「AI 工具」输入框中填写要打开的程序或路径",
+                )
         elif item.action_type == "open":
             if item.target:
+                usage_key = "custom"
                 result = self.actions.open_custom_target(
                     item.target, item.label
                 )
@@ -2733,15 +3013,13 @@ class MouseGestureApp:
         text = f"轮盘菜单：{item.label}  ·  {result.message}"
         if result.detail:
             text += f"\n{result.detail}"
+        if result.success and usage_key is not None:
+            self._record_usage(usage_key)
         self._append_log(text, event_type)
         self._show_toast(
             f"{item.label}：{result.message}",
             COLORS["green"] if result.success else COLORS["red"],
         )
-
-    def _on_radial_menu_close(self) -> None:
-        """Handle radial menu close without selection."""
-        self._append_log("轮盘菜单已关闭", "muted")
 
     def _request_close(self) -> None:
         if self._closing:
@@ -2926,6 +3204,12 @@ class MouseGestureApp:
         except Exception:
             pass
         finally:
+            try:
+                if self.clipboard_panel is not None:
+                    self.clipboard_panel.stop()
+                    self.clipboard_panel.save()
+            except Exception:
+                pass
             self.root.quit()
             self.root.destroy()
 

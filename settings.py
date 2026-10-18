@@ -38,7 +38,8 @@ class RadialMenuItemSettings:
     """Persisted configuration for a single radial menu item."""
     label: str = ""
     icon_text: str = ""
-    action_type: str = "shortcut"  # "shortcut" or "open"
+    action_type: str = "open"  # open/set_paste_enhanced/set_paste_normal/
+    # calculator/browser/mouse_pointer_size/ai_tool/brightness/contrast
     modifiers: tuple[str, ...] = ()
     key: str = ""
     target: str = ""
@@ -46,14 +47,14 @@ class RadialMenuItemSettings:
 
 def default_radial_menu_items() -> tuple[RadialMenuItemSettings, ...]:
     return (
-        RadialMenuItemSettings("撤销", "↩", "shortcut", ("ctrl",), "Z"),
-        RadialMenuItemSettings("复制", "⧉", "shortcut", ("ctrl",), "C"),
-        RadialMenuItemSettings("粘贴", "📋", "shortcut", ("ctrl",), "V"),
-        RadialMenuItemSettings("新建表格", "⊞", "open", target="excel"),
-        RadialMenuItemSettings("AI PPT", "◆", "open", target=""),
-        RadialMenuItemSettings("新建文字", "📄", "open", target="winword"),
-        RadialMenuItemSettings("剪切", "✂", "shortcut", ("ctrl",), "X"),
-        RadialMenuItemSettings("打印", "⎙", "shortcut", ("ctrl",), "P"),
+        RadialMenuItemSettings("鼠标大小", "⤢", "mouse_pointer_size"),
+        RadialMenuItemSettings("普通粘贴", "⧉", "set_paste_normal"),
+        RadialMenuItemSettings("增强粘贴", "⊕", "set_paste_enhanced"),
+        RadialMenuItemSettings("对比度", "◐", "contrast"),
+        RadialMenuItemSettings("AI 工具", "✦", "ai_tool"),
+        RadialMenuItemSettings("亮度", "☀", "brightness"),
+        RadialMenuItemSettings("浏览器", "◎", "browser"),
+        RadialMenuItemSettings("计算器", "▦", "calculator"),
     )
 
 
@@ -141,9 +142,21 @@ def _normalize_radial_menu_items(
         if not label:
             continue
         icon_text = str(raw.get("icon_text", "●"))
-        action_type = str(raw.get("action_type", "shortcut")).lower()
-        if action_type not in ("shortcut", "open"):
-            action_type = "shortcut"
+        action_type = str(raw.get("action_type", "open")).lower()
+        if action_type not in (
+            "shortcut",
+            "open",
+            "enhanced_paste",
+            "set_paste_enhanced",
+            "set_paste_normal",
+            "calculator",
+            "browser",
+            "mouse_pointer_size",
+            "ai_tool",
+            "brightness",
+            "contrast",
+        ):
+            action_type = "open"
         raw_mods = raw.get("modifiers", ())
         if not isinstance(raw_mods, (list, tuple)):
             raw_mods = ()
@@ -160,6 +173,36 @@ def _normalize_radial_menu_items(
                 target=target,
             )
         )
+
+    # One-time upgrade from earlier default sets. The current defaults are
+    # the eight function tiles (鼠标大小/普通粘贴/增强粘贴/对比度/AI 工具/
+    # 亮度/浏览器/计算器); any persisted layout that still carries a legacy
+    # shortcut item, the intermediate "enhanced_paste" action, or one of the
+    # old labels (打印/剪切/新建文字/新建表格/AI PPT/撤销) is replaced
+    # wholesale with the current defaults. There is no radial-item editing
+    # UI yet, so replacing the whole layout is safe.
+    LEGACY_RADIAL_LABELS = {
+        "打印",
+        "剪切",
+        "新建文字",
+        "新建表格",
+        "AI PPT",
+        "撤销",
+        "复制",
+    }
+
+    def _is_legacy(item: RadialMenuItemSettings) -> bool:
+        if item.action_type == "shortcut":
+            return True
+        if item.action_type == "enhanced_paste":
+            return True
+        if item.label in LEGACY_RADIAL_LABELS:
+            return True
+        return False
+
+    if any(_is_legacy(item) for item in normalized):
+        return defaults
+
     return tuple(normalized) if normalized else defaults
 
 
@@ -168,9 +211,11 @@ class AppSettings:
     launch_listening: bool = True
     minimize_on_start: bool = False
     show_radial_menu_on_start: bool = True
+    clipboard_history_enabled: bool = True
     screenshot_side_buttons: tuple[str, ...] = DEFAULT_SCREENSHOT_SIDE_BUTTONS
     custom_button_name: str = "自定义"
     custom_button_target: str = ""
+    ai_tool_target: str = ""
     keyboard_mappings: tuple[KeyboardMappingSettings, ...] = field(
         default_factory=default_keyboard_mappings
     )
@@ -218,6 +263,7 @@ class AppSettings:
         settings.custom_button_target = str(
             settings.custom_button_target
         ).strip()
+        settings.ai_tool_target = str(settings.ai_tool_target).strip()
         settings.keyboard_mappings = _normalize_keyboard_mappings(
             raw_keyboard_mappings
         )

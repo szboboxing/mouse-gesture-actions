@@ -177,8 +177,19 @@ class SystemActions:
         return self._open_target("calc.exe", "计算器")
 
     def open_browser(self) -> ActionResult:
+        # 内网使用：只负责唤起系统默认浏览器，不强制访问任何外部站点，
+        # 用中性空白页启动，避免出现无网络时的外联请求或加载失败。
         try:
-            if not webbrowser.open("https://www.bing.com", new=2):
+            try:
+                opener = webbrowser.get()
+                launched = bool(opener.open("about:blank", new=2))
+            except webbrowser.Error:
+                launched = False
+            if not launched:
+                # 某些浏览器句柄拒绝 about:blank 时，退回系统 start 命令。
+                os.startfile("about:blank")
+                launched = True
+            if not launched:
                 return ActionResult(False, "浏览器启动失败", "未找到默认浏览器")
             return ActionResult(True, "已启动浏览器", "使用系统默认浏览器")
         except (OSError, webbrowser.Error) as exc:
@@ -220,16 +231,15 @@ class SystemActions:
         )
 
     def open_mouse_pointer_size_settings(self) -> ActionResult:
-        """按 Win10 / Win11 分流打开鼠标指针大小设置页。"""
-        build = sys.getwindowsversion().build
-        if build >= 22000:
-            # Win11：设置 → 辅助功能 → 鼠标指针与触控
-            target = "ms-settings:easeofaccess-mousepointer"
-            detail = "已打开「设置 → 辅助功能 → 鼠标指针与触控」"
-        else:
-            # Win10：设置 → 轻松使用 → 鼠标指针（调整鼠标和光标大小）
-            target = "ms-settings:easeofaccess-cursorandpointersize"
-            detail = "已打开「设置 → 轻松使用 → 调整鼠标和光标大小」"
+        """打开「鼠标指针大小和颜色」设置页。
+
+        ``ms-settings:easeofaccess-mousepointer`` 在 Windows 10 (19045) 与
+        Windows 11 上都会直接落到含“更改指针大小”滑块的页面（已实测）；
+        旧代码在 Win10 使用的 ``easeofaccess-cursorandpointersize`` 在
+        19045 上是无效 URI，会停在错误页面，故统一改用 mousepointer。
+        """
+        target = "ms-settings:easeofaccess-mousepointer"
+        detail = "已打开「设置 → 轻松使用/辅助功能 → 鼠标指针」"
         try:
             os.startfile(target)
             return ActionResult(True, "已启动鼠标指针大小设置", detail)
