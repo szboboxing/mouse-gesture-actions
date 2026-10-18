@@ -21,7 +21,9 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          # 与本地验证环境一致（Python 3.11），产物体积更小（约 9MB，
+          # 3.13 运行时会大 ~4MB）；内网离线工具，3.11 完全够用。
+          python-version: "3.11"
           cache: pip
           cache-dependency-path: requirements-dev.txt
 
