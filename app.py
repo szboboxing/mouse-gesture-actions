@@ -23,12 +23,14 @@ from mouse_hook import (
     MouseControl,
     MouseTestEvent,
 )
+from radial_menu import DEFAULT_RADIAL_ITEMS, RadialItem, RadialMenu
 from settings import (
     KEYBOARD_MAPPING_ACTION_ENHANCED_PASTE,
     KEYBOARD_MAPPING_ACTION_SHORTCUT,
     KEYBOARD_MAPPING_KEYS,
     AppSettings,
     KeyboardMappingSettings,
+    RadialMenuItemSettings,
     load_settings,
 )
 from version import APP_NAME, VERSION_TAG
@@ -325,10 +327,14 @@ class MouseGestureApp:
         self._shutdown_watchdog: threading.Timer | None = None
         self._close_dialog: tk.Toplevel | None = None
         self._close_cancel_button: tk.Button | None = None
+        self.radial_menu: RadialMenu | None = None
 
         self.launch_var = tk.BooleanVar(value=self.settings.launch_listening)
         self.minimize_var = tk.BooleanVar(
             value=self.settings.minimize_on_start
+        )
+        self.radial_menu_var = tk.BooleanVar(
+            value=self.settings.show_radial_menu_on_start
         )
         self.status_var = tk.StringVar(value="正在初始化")
         self.left_clicks_var = tk.StringVar(value="0")
@@ -408,6 +414,7 @@ class MouseGestureApp:
         self.root.after(60, self._poll_ui_events)
         self.root.after(300, self._refresh_metrics)
         self.root.after(150, self._start_hook)
+        self.root.after(400, self._show_radial_menu)
 
     def _configure_window(self) -> None:
         self.root.title(f"{APP_NAME} {VERSION_TAG}")
@@ -1006,7 +1013,13 @@ class MouseGestureApp:
             text="启动时最小化",
             variable=self.minimize_var,
             style="App.TCheckbutton",
-        ).grid(row=0, column=2, padx=(0, 10))
+        ).grid(row=0, column=2, padx=(0, 8))
+        ttk.Checkbutton(
+            settings_panel,
+            text="启动时显示轮盘",
+            variable=self.radial_menu_var,
+            style="App.TCheckbutton",
+        ).grid(row=0, column=3, padx=(0, 10))
 
         save_button = tk.Button(
             settings_panel,
@@ -1023,8 +1036,8 @@ class MouseGestureApp:
             pady=7,
             font=("Microsoft YaHei UI", 9, "bold"),
         )
-        save_button.grid(row=0, column=3, sticky="e")
-        settings_panel.columnconfigure(3, weight=1)
+        save_button.grid(row=0, column=4, sticky="e")
+        settings_panel.columnconfigure(4, weight=1)
         self._build_encouragement(page)
 
     def _build_mouse_test_page(self, page: tk.Frame) -> None:
@@ -2306,10 +2319,12 @@ class MouseGestureApp:
         self.settings = AppSettings(
             launch_listening=self.launch_var.get(),
             minimize_on_start=self.minimize_var.get(),
+            show_radial_menu_on_start=self.radial_menu_var.get(),
             screenshot_side_buttons=self.settings.screenshot_side_buttons,
             custom_button_name=self.settings.custom_button_name,
             custom_button_target=self.settings.custom_button_target,
             keyboard_mappings=self._collect_keyboard_mappings(),
+            radial_menu_items=self.settings.radial_menu_items,
         )
         try:
             self.settings.save()
@@ -2662,6 +2677,71 @@ class MouseGestureApp:
             self.toast.destroy()
         self.toast = None
         self.toast_after_id = None
+
+    def _show_radial_menu(self) -> None:
+        """Display the startup radial menu overlay."""
+        if not self.settings.show_radial_menu_on_start:
+            return
+        if self.radial_menu is not None and self.radial_menu._is_active:
+            return
+        items = self._get_radial_menu_items()
+        self.radial_menu = RadialMenu(
+            parent=self.root,
+            on_item_selected=self._on_radial_item_selected,
+            on_close=self._on_radial_menu_close,
+            items=items,
+        )
+        self.radial_menu.show()
+
+    def _get_radial_menu_items(self) -> tuple[RadialItem, ...]:
+        """Convert settings to RadialItem tuples."""
+        if not self.settings.radial_menu_items:
+            return DEFAULT_RADIAL_ITEMS
+        items: list[RadialItem] = []
+        for s in self.settings.radial_menu_items:
+            items.append(
+                RadialItem(
+                    label=s.label,
+                    icon_text=s.icon_text,
+                    action_type=s.action_type,
+                    modifiers=s.modifiers,
+                    key=s.key,
+                    target=s.target,
+                )
+            )
+        return tuple(items) if items else DEFAULT_RADIAL_ITEMS
+
+    def _on_radial_item_selected(self, item: RadialItem) -> None:
+        """Execute the action for a selected radial menu item."""
+        if item.action_type == "shortcut":
+            result = self.actions.send_custom_shortcut(
+                item.modifiers, item.key
+            )
+        elif item.action_type == "open":
+            if item.target:
+                result = self.actions.open_custom_target(
+                    item.target, item.label
+                )
+            else:
+                result = ActionResult(
+                    False, f"{item.label}尚未配置", item.description
+                )
+        else:
+            result = ActionResult(False, "未知操作类型", item.action_type)
+
+        event_type = "success" if result.success else "error"
+        text = f"轮盘菜单：{item.label}  ·  {result.message}"
+        if result.detail:
+            text += f"\n{result.detail}"
+        self._append_log(text, event_type)
+        self._show_toast(
+            f"{item.label}：{result.message}",
+            COLORS["green"] if result.success else COLORS["red"],
+        )
+
+    def _on_radial_menu_close(self) -> None:
+        """Handle radial menu close without selection."""
+        self._append_log("轮盘菜单已关闭", "muted")
 
     def _request_close(self) -> None:
         if self._closing:

@@ -33,6 +33,30 @@ class KeyboardMappingSettings:
     action: str = KEYBOARD_MAPPING_ACTION_SHORTCUT
 
 
+@dataclass(frozen=True, slots=True)
+class RadialMenuItemSettings:
+    """Persisted configuration for a single radial menu item."""
+    label: str = ""
+    icon_text: str = ""
+    action_type: str = "shortcut"  # "shortcut" or "open"
+    modifiers: tuple[str, ...] = ()
+    key: str = ""
+    target: str = ""
+
+
+def default_radial_menu_items() -> tuple[RadialMenuItemSettings, ...]:
+    return (
+        RadialMenuItemSettings("撤销", "↩", "shortcut", ("ctrl",), "Z"),
+        RadialMenuItemSettings("复制", "⧉", "shortcut", ("ctrl",), "C"),
+        RadialMenuItemSettings("粘贴", "📋", "shortcut", ("ctrl",), "V"),
+        RadialMenuItemSettings("新建表格", "⊞", "open", target="excel"),
+        RadialMenuItemSettings("AI PPT", "◆", "open", target=""),
+        RadialMenuItemSettings("新建文字", "📄", "open", target="winword"),
+        RadialMenuItemSettings("剪切", "✂", "shortcut", ("ctrl",), "X"),
+        RadialMenuItemSettings("打印", "⎙", "shortcut", ("ctrl",), "P"),
+    )
+
+
 def default_keyboard_mappings() -> tuple[KeyboardMappingSettings, ...]:
     return (
         KeyboardMappingSettings("xbutton1", ("ctrl",), "C"),
@@ -99,25 +123,71 @@ def _normalize_keyboard_mappings(
     return tuple(normalized)
 
 
+def _normalize_radial_menu_items(
+    raw_items: object,
+) -> tuple[RadialMenuItemSettings, ...]:
+    defaults = default_radial_menu_items()
+    if not isinstance(raw_items, (list, tuple)) or len(raw_items) == 0:
+        return defaults
+
+    normalized: list[RadialMenuItemSettings] = []
+    for raw in raw_items:
+        if isinstance(raw, RadialMenuItemSettings):
+            normalized.append(raw)
+            continue
+        if not isinstance(raw, dict):
+            continue
+        label = str(raw.get("label", "")).strip()
+        if not label:
+            continue
+        icon_text = str(raw.get("icon_text", "●"))
+        action_type = str(raw.get("action_type", "shortcut")).lower()
+        if action_type not in ("shortcut", "open"):
+            action_type = "shortcut"
+        raw_mods = raw.get("modifiers", ())
+        if not isinstance(raw_mods, (list, tuple)):
+            raw_mods = ()
+        modifiers = tuple(str(m).lower() for m in raw_mods)
+        key = str(raw.get("key", "")).upper()
+        target = str(raw.get("target", "")).strip()
+        normalized.append(
+            RadialMenuItemSettings(
+                label=label,
+                icon_text=icon_text,
+                action_type=action_type,
+                modifiers=modifiers,
+                key=key,
+                target=target,
+            )
+        )
+    return tuple(normalized) if normalized else defaults
+
+
 @dataclass(slots=True)
 class AppSettings:
     launch_listening: bool = True
     minimize_on_start: bool = False
+    show_radial_menu_on_start: bool = True
     screenshot_side_buttons: tuple[str, ...] = DEFAULT_SCREENSHOT_SIDE_BUTTONS
     custom_button_name: str = "自定义"
     custom_button_target: str = ""
     keyboard_mappings: tuple[KeyboardMappingSettings, ...] = field(
         default_factory=default_keyboard_mappings
     )
+    radial_menu_items: tuple[RadialMenuItemSettings, ...] = field(
+        default_factory=default_radial_menu_items
+    )
 
     @classmethod
     def from_mapping(cls, data: dict[str, Any]) -> "AppSettings":
         allowed = {item.name for item in fields(cls)}
         raw_keyboard_mappings = data.get("keyboard_mappings")
+        raw_radial_menu_items = data.get("radial_menu_items")
         values = {
             key: value
             for key, value in data.items()
-            if key in allowed and key != "keyboard_mappings"
+            if key in allowed
+            and key not in ("keyboard_mappings", "radial_menu_items")
         }
         settings = cls(**values)
         raw_side_buttons = settings.screenshot_side_buttons
@@ -150,6 +220,9 @@ class AppSettings:
         ).strip()
         settings.keyboard_mappings = _normalize_keyboard_mappings(
             raw_keyboard_mappings
+        )
+        settings.radial_menu_items = _normalize_radial_menu_items(
+            raw_radial_menu_items
         )
         return settings
 
