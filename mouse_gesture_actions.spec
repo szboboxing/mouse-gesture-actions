@@ -25,8 +25,6 @@ a = Analysis(
         "pythoncom",
         "pywintypes",
         "win32com.client",
-        "win32com.shell.shell",
-        "win32com.shell.shellcon",
         "win32gui",
     ],
     hookspath=[],
@@ -35,6 +33,11 @@ a = Analysis(
     excludes=[
         "PIL",
         "pytest",
+        # 桌面路径改用 ctypes 调 shell32，不再需要 win32com.shell。
+        # 排除 win32com.shell/win32ui 可去掉 mfc140u.dll(约 5.6MB) 依赖，
+        # 既显著减小体积，又让纯内网 Win10/11（未装 VC++ 运行库）也能直接运行。
+        "win32com.shell",
+        "win32ui",
         # 内网工具，无联网/TLS 需求：排除 ssl 与 openssl 扩展，
         # 可直接去掉 libssl-3.dll(~0.8MB) 与 libcrypto-3.dll(~5.2MB)。
         # hashlib 保留但走 CPython 内置 _sha2（random 仍能取到 sha512），

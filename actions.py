@@ -11,7 +11,6 @@ from pathlib import Path
 import pythoncom
 import win32com.client
 import win32gui
-from win32com.shell import shell, shellcon
 
 from display_controls import DisplayController
 from settings import KEYBOARD_MAPPING_KEYS
@@ -271,16 +270,34 @@ class SystemActions:
             return ActionResult(False, f"{action_name}启动失败", str(exc))
 
 
+CSIDL_DESKTOPDIRECTORY = 0x0019
+
+
+def _desktop_directory() -> str | None:
+    """Return the localized Desktop folder path via shell32.
+
+    Uses ``SHGetFolderPathW`` directly through ctypes so the app does not
+    depend on ``win32com.shell`` (which drags in ``win32ui`` and the large
+    MFC runtime DLL, inflating the single-file build and requiring the VC++
+    redistributable on clean intranet machines).
+    """
+    buffer = ctypes.create_unicode_buffer(260)
+    result = ctypes.windll.shell32.SHGetFolderPathW(
+        0, CSIDL_DESKTOPDIRECTORY, 0, 0, buffer
+    )
+    if result != 0 or not buffer.value:
+        return None
+    return buffer.value
+
+
 def get_active_explorer_directory() -> Path | None:
     foreground = win32gui.GetForegroundWindow()
     root_window = win32gui.GetAncestor(foreground, GA_ROOT)
     class_name = win32gui.GetClassName(root_window)
 
     if class_name in {"Progman", "WorkerW"}:
-        desktop = shell.SHGetFolderPath(
-            0, shellcon.CSIDL_DESKTOPDIRECTORY, None, 0
-        )
-        return Path(desktop)
+        desktop = _desktop_directory()
+        return Path(desktop) if desktop else None
 
     if class_name not in {"CabinetWClass", "ExploreWClass"}:
         return None
