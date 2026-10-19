@@ -1,7 +1,9 @@
 """Radial (pie) menu panel for Mouse Gesture Actions.
 
-Minimal Apple/iOS look: a clean frosted base with transparent, thin-outlined
-tiles and label pills floating on top (soft shadow + hairline rim + glyph).
+Minimal Apple/iOS look: the wheel sits on a glass wallpaper (three styles:
+冰霜 / 烟晶 / 彩璃) and every element is painted from a light or dark palette,
+switched with the 「明暗」 button in the top bar. Tiles are opaque frosted
+cards with a thin accent rim so they stay readable on top of the picture.
 The current normal/enhanced paste mode is shown as a coloured badge in the
 top status bar and highlighted on the matching wheel tile.
 """
@@ -13,6 +15,7 @@ import tkinter as tk
 from dataclasses import dataclass
 from typing import Callable
 
+import themes
 
 @dataclass(frozen=True, slots=True)
 class RadialItem:
@@ -77,6 +80,9 @@ DEFAULT_RADIAL_ITEMS: tuple[RadialItem, ...] = (
 )
 
 
+# Light-mode colour map kept for backwards compatibility: app.py and
+# clipboard_history.py still read a few keys from it. The wheel itself paints
+# from ``themes.palette(mode)`` so it can switch to 暗夜 at runtime.
 COLORS = {
     "bg": "#EEF1F8",
     "card": "#FFFFFF",
@@ -104,24 +110,11 @@ COLORS = {
     "paste_normal": "#FF9500",
 }
 
-# Frosted backdrop palette
-_BASE = "#EEF1F8"
-_SHADOW = "#B9C1D4"
-_HILITE = "#FFFFFF"
-
-# Accent hue per tile (thin outline colour + glyph tint)
+# Accent hue per tile in light mode (thin outline colour + glyph tint).
 # index order = DEFAULT_RADIAL_ITEMS: 鼠标大小 普通粘贴 增强粘贴 对比度
 # AI 工具 亮度 浏览器 计算器. 增强=红, 普通=橙; 亮度/浏览器接手旧绿/靛蓝。
-ITEM_ACCENTS: tuple[str, ...] = (
-    COLORS["hover"],        # 鼠标大小
-    COLORS["paste_normal"], # 普通粘贴 (橙)
-    COLORS["paste_enhanced"],  # 增强粘贴 (红)
-    COLORS["icon_teal"],    # 对比度
-    COLORS["icon_purple"],  # AI 工具
-    COLORS["icon_success"], # 亮度 (绿)
-    COLORS["icon_indigo"],  # 浏览器 (靛蓝)
-    COLORS["hover"],        # 计算器
-)
+# The wheel itself asks ``themes.tile_accents(mode)`` so 暗夜 can brighten them.
+ITEM_ACCENTS: tuple[str, ...] = themes.tile_accents("light")
 
 # Tiles whose icon is split into two independent halves: the left half is the
 # 「＋」button and the right half is the 「－」button. Both halves respond to the
@@ -130,20 +123,72 @@ ITEM_ACCENTS: tuple[str, ...] = (
 # active, so a right-click on the wheel did not always reach the canvas.
 SPLIT_ACTIONS = frozenset({"brightness", "contrast"})
 
-
-def _mix(color_a: str, color_b: str, t: float) -> str:
-    """Linear interpolation between two #rrggbb colours (t=0 → a)."""
-    ar, ag, ab = int(color_a[1:3], 16), int(color_a[3:5], 16), int(color_a[5:7], 16)
-    br, bg, bb = int(color_b[1:3], 16), int(color_b[3:5], 16), int(color_b[5:7], 16)
-    r = round(ar + (br - ar) * t)
-    g = round(ag + (bg - ag) * t)
-    b = round(ab + (bb - ab) * t)
-    return f"#{r:02X}{g:02X}{b:02X}"
+# Kept as an alias: colour maths now lives in themes so every widget blends
+# the light/dark palettes the same way.
+_mix = themes.mix
 
 
-def _tint(accent: str, toward_white: float) -> str:
-    """Glass body colour: blend accent toward the frosted base."""
-    return _mix(accent, _BASE, toward_white)
+class _Tooltip:
+    """Tiny hover hint — no external widgets, works offline in the EXE."""
+
+    _current: "_Tooltip | None" = None
+
+    def __init__(self, widget: tk.Widget, text: str) -> None:
+        self.widget = widget
+        self.text = text
+        self.window: tk.Toplevel | None = None
+        widget.bind("<Enter>", self._schedule, add="+")
+        widget.bind("<Leave>", self._hide, add="+")
+        widget.bind("<Button-1>", self._hide, add="+")
+
+    def _schedule(self, _event: tk.Event) -> None:
+        _Tooltip.dismiss()
+        try:
+            self.widget.after(650, self._show)
+        except tk.TclError:
+            pass
+
+    def _show(self) -> None:
+        if self.window is not None or not self.widget.winfo_exists():
+            return
+        _Tooltip.dismiss()
+        x = self.widget.winfo_rootx() + 6
+        y = self.widget.winfo_rooty() + self.widget.winfo_height() + 6
+        self.window = tk.Toplevel(self.widget)
+        self.window.wm_overrideredirect(True)
+        self.window.wm_geometry(f"+{x}+{y}")
+        tk.Label(
+            self.window,
+            text=self.text,
+            bg="#1C1C1E",
+            fg="#FFFFFF",
+            font=("Microsoft YaHei UI", 9),
+            padx=8,
+            pady=4,
+        ).pack()
+        _Tooltip._current = self
+
+    def _hide(self, _event: tk.Event | None = None) -> None:
+        _Tooltip.dismiss()
+
+    @classmethod
+    def dismiss(cls) -> None:
+        tip = cls._current
+        if tip is not None and tip.window is not None:
+            try:
+                tip.window.destroy()
+            except tk.TclError:
+                pass
+            tip.window = None
+        cls._current = None
+
+
+def _attach_tooltip(widget: tk.Widget, text: str) -> None:
+    """Best-effort hint: never let a tooltip break the button it decorates."""
+    try:
+        widget._qoder_tooltip = _Tooltip(widget, text)
+    except (AttributeError, tk.TclError):
+        pass
 
 
 def _rounded_rect(
@@ -181,10 +226,15 @@ class RadialMenuPanel(tk.Frame):
         on_item_selected: Callable[..., None] | None = None,
         on_settings: Callable[[], None] | None = None,
         items: tuple[RadialItem, ...] = DEFAULT_RADIAL_ITEMS,
+        style: str | None = None,
+        mode: str | None = None,
+        on_theme_change: Callable[[str, str], None] | None = None,
     ) -> None:
-        super().__init__(parent, bg=COLORS["bg"])
+        self.style = themes.normalize_style(style)
+        self.mode = themes.normalize_mode(mode)
         self.on_item_selected = on_item_selected
         self.on_settings = on_settings
+        self.on_theme_change = on_theme_change
         self.items = items
         self._canvas: tk.Canvas | None = None
         self._center_x: float = 0
@@ -195,33 +245,112 @@ class RadialMenuPanel(tk.Frame):
         self._ch: int = 0
         self._hovered_key: tuple[int, int] = (-1, 0)
         self._status_var: tk.StringVar = tk.StringVar(value="正在初始化")
-        self._status_dot_color: str = COLORS["status_orange"]
+        self._status_dot_color: str = themes.accent_colors(self.mode)["warning"]
         self._paste_enhanced: bool | None = None
+        # Wallpaper PhotoImages are cached per style/mode so switching back is
+        # instant and the reference keeps Tk from discarding the picture.
+        self._bg_images: dict[str, tk.PhotoImage] = {}
+        self._apply_theme_state()
 
+        super().__init__(parent, bg=self._pal["base"])
         self._build_ui()
 
+    # ------------------------------------------------------------------
+    # Theme (glass style + light/dark palette)
+    # ------------------------------------------------------------------
+
+    def _apply_theme_state(self) -> None:
+        self._pal = themes.palette(self.mode)
+        self._edges = themes.wallpaper_edges(self.style, self.mode)
+        self._accents = themes.accent_colors(self.mode)
+        self._accents["gray"] = themes.tile_accents(self.mode)[-1]
+        self._bg_color = themes.mix(
+            self._edges["top"], self._edges["bottom"], 0.5
+        )
+
+    @property
+    def palette(self) -> dict[str, str]:
+        """The palette the wheel is currently painted with."""
+        return dict(self._pal)
+
+    def theme(self) -> tuple[str, str]:
+        return (self.style, self.mode)
+
+    def set_theme(
+        self,
+        style: str | None = None,
+        mode: str | None = None,
+        *,
+        notify: bool = True,
+    ) -> None:
+        """Switch the wallpaper style and/or the light/dark palette."""
+        if style is not None:
+            self.style = themes.normalize_style(style)
+        if mode is not None:
+            self.mode = themes.normalize_mode(mode)
+        self._apply_theme_state()
+        self.configure(bg=self._pal["base"])
+        self._rebuild_ui()
+        if notify and self.on_theme_change is not None:
+            self.on_theme_change(self.style, self.mode)
+
+    def cycle_style(self) -> None:
+        self.set_theme(style=themes.next_style(self.style))
+
+    def toggle_mode(self) -> None:
+        self.set_theme(mode=themes.next_mode(self.mode))
+
+    def _rebuild_ui(self) -> None:
+        """Re-create every child widget so the new palette is applied."""
+        if self._canvas is not None:
+            self._canvas.delete("all")
+        for child in self.winfo_children():
+            child.destroy()
+        self._hovered_key = (-1, 0)
+        self._build_ui()
+
+    def _background_image(self) -> tk.PhotoImage | None:
+        """Load (and cache) the wallpaper for the current style/mode."""
+        key = f"{self.style}_{self.mode}"
+        cached = self._bg_images.get(key)
+        if cached is not None:
+            return cached
+        path = themes.wallpaper_path(self.style, self.mode)
+        if not path.is_file():
+            return None
+        try:
+            image = tk.PhotoImage(file=str(path))
+        except tk.TclError:
+            return None
+        self._bg_images[key] = image
+        return image
+
     def _build_ui(self) -> None:
-        # Frosted top bar
-        top_bar = tk.Frame(self, bg=COLORS["top_bar"], height=58)
+        pal = self._pal
+        # Top bar painted with the wallpaper's own top edge colour so the bar,
+        # the picture and the clipboard panel read as one sheet of glass.
+        top_bar = tk.Frame(self, bg=self._edges["top"], height=58)
         top_bar.pack(fill="x", side="top")
         top_bar.pack_propagate(False)
-        tk.Frame(self, bg=COLORS["top_bar_border"], height=1).pack(
+        tk.Frame(self, bg=pal["top_bar_border"], height=1).pack(
             fill="x", side="top"
         )
 
-        status_frame = tk.Frame(top_bar, bg=COLORS["top_bar"])
-        status_frame.pack(side="left", padx=(24, 0), pady=14)
+        status_frame = tk.Frame(top_bar, bg=self._edges["top"])
+        status_frame.pack(side="left", padx=(20, 0), pady=14)
 
         self._status_canvas = tk.Canvas(
             status_frame,
             width=16,
             height=16,
-            bg=COLORS["top_bar"],
+            bg=self._edges["top"],
             highlightthickness=0,
         )
         self._status_canvas.pack(side="left", padx=(0, 10))
         # status dot with a soft halo
-        self._status_canvas.create_oval(2, 2, 14, 14, fill="#E6E9F2", outline="")
+        self._status_canvas.create_oval(
+            2, 2, 14, 14, fill=themes.mix(self._edges["top"], pal["base"], 0.5), outline=""
+        )
         self._status_dot_id = self._status_canvas.create_oval(
             4, 4, 12, 12, fill=self._status_dot_color, outline=""
         )
@@ -229,8 +358,8 @@ class RadialMenuPanel(tk.Frame):
         tk.Label(
             status_frame,
             textvariable=self._status_var,
-            bg=COLORS["top_bar"],
-            fg=COLORS["status_text"],
+            bg=self._edges["top"],
+            fg=pal["status_text"],
             font=("Microsoft YaHei UI", 11, "bold"),
         ).pack(side="left")
 
@@ -239,10 +368,10 @@ class RadialMenuPanel(tk.Frame):
             top_bar,
             text="⚙  更多设置",
             command=self._handle_settings,
-            bg=_tint(COLORS["hover"], 0.82),
-            fg=COLORS["hover"],
-            activebackground=_tint(COLORS["hover"], 0.68),
-            activeforeground=COLORS["hover"],
+            bg=pal["pill_body"],
+            fg=pal["pill_text"],
+            activebackground=pal["pill_hover"],
+            activeforeground=pal["pill_text"],
             relief="flat",
             bd=0,
             cursor="hand2",
@@ -252,12 +381,12 @@ class RadialMenuPanel(tk.Frame):
         )
         settings_btn.pack(side="right", padx=(0, 20), pady=12)
 
-        # Paste-mode badge (right of status, left of settings button).
+        # Paste-mode badge (left of the settings button).
         self._mode_badge = tk.Label(
             top_bar,
             text="",
-            bg=COLORS["top_bar"],
-            fg=COLORS["status_muted"],
+            bg=self._edges["top"],
+            fg=pal["status_muted"],
             font=("Microsoft YaHei UI", 11, "bold"),
             padx=14,
             pady=5,
@@ -265,13 +394,31 @@ class RadialMenuPanel(tk.Frame):
         self._mode_badge.pack(side="right", padx=(0, 12), pady=13)
         self._update_mode_badge()
 
-        # Canvas area for the frosted radial menu
-        canvas_frame = tk.Frame(self, bg=COLORS["canvas_bg"])
+        # 「明暗」 toggle, then 「风格」 — packed right-to-left so 风格 ends up
+        # furthest from the settings button.
+        self._mode_btn = self._pill(
+            top_bar,
+            f"{'☾' if self.mode == 'dark' else '☀'}  {themes.mode_label(self.mode)}",
+            self.toggle_mode,
+            tip="切换明亮模式 / 暗夜模式",
+        )
+        self._mode_btn.pack(side="right", padx=(0, 8), pady=12)
+
+        self._style_btn = self._pill(
+            top_bar,
+            f"◈ 风格 · {themes.style_label(self.style)}",
+            self.cycle_style,
+            tip="切换轮盘玻璃壁纸：冰霜 → 烟晶 → 彩璃",
+        )
+        self._style_btn.pack(side="right", padx=(0, 8), pady=12)
+
+        # Canvas area carrying the glass wallpaper + the wheel
+        canvas_frame = tk.Frame(self, bg=self._bg_color)
         canvas_frame.pack(fill="both", expand=True)
 
         self._canvas = tk.Canvas(
             canvas_frame,
-            bg=COLORS["canvas_bg"],
+            bg=self._bg_color,
             highlightthickness=0,
         )
         self._canvas.pack(fill="both", expand=True)
@@ -281,6 +428,43 @@ class RadialMenuPanel(tk.Frame):
         self._canvas.bind("<Button-3>", self._on_right_click)
         self._canvas.bind("<Motion>", self._on_motion)
         self._canvas.bind("<Leave>", self._on_leave)
+
+        if self._cw > 0 and self._ch > 0:
+            # Repaint straight away after a theme switch (no new Configure
+            # arrives because the geometry did not change).
+            self._draw_menu()
+
+    def _pill(
+        self,
+        parent: tk.Misc,
+        text: str,
+        command: Callable[[], None],
+        *,
+        tip: str = "",
+    ) -> tk.Button:
+        pal = self._pal
+        btn = tk.Button(
+            parent,
+            text=text,
+            command=command,
+            bg=pal["pill_body"],
+            fg=pal["pill_text"],
+            activebackground=pal["pill_hover"],
+            activeforeground=pal["pill_text"],
+            disabledforeground=pal["pill_text"],
+            relief="flat",
+            bd=0,
+            cursor="hand2",
+            font=("Microsoft YaHei UI", 10, "bold"),
+            padx=14,
+            pady=5,
+            highlightthickness=1,
+            highlightbackground=pal["pill_rim"],
+            highlightcolor=pal["pill_rim"],
+        )
+        if tip:
+            _attach_tooltip(btn, tip)
+        return btn
 
     def set_status(self, text: str, color: str) -> None:
         self._status_var.set(text)
@@ -304,21 +488,24 @@ class RadialMenuPanel(tk.Frame):
         """Reflect the normal/enhanced paste mode in the top-bar badge."""
         if getattr(self, "_mode_badge", None) is None:
             return
+        pal = self._pal
         if self._paste_enhanced is True:
+            accent = self._accents["paste_enhanced"]
             self._mode_badge.configure(
                 text="●  增强模式",
-                bg=_tint(COLORS["paste_enhanced"], 0.86),
-                fg=COLORS["paste_enhanced"],
+                bg=themes.mix(accent, pal["tile_body"], 0.80),
+                fg=themes.mix(accent, pal["status_text"], 0.15),
             )
         elif self._paste_enhanced is False:
+            accent = self._accents["paste_normal"]
             self._mode_badge.configure(
                 text="●  普通模式",
-                bg=_tint(COLORS["paste_normal"], 0.82),
-                fg=COLORS["paste_normal"],
+                bg=themes.mix(accent, pal["tile_body"], 0.80),
+                fg=themes.mix(accent, pal["status_text"], 0.15),
             )
         else:
             self._mode_badge.configure(
-                text="", bg=COLORS["top_bar"], fg=COLORS["status_muted"]
+                text="", bg=self._edges["top"], fg=pal["status_muted"]
             )
 
     def _handle_settings(self) -> None:
@@ -352,12 +539,21 @@ class RadialMenuPanel(tk.Frame):
         active: bool = False,
         active_fill: str | None = None,
         glyph_fill: str | None = None,
+        body: str | None = None,
     ) -> None:
-        """Transparent floating tile: near-invisible body + thin accent
-        outline + soft shadow so the glyph floats on the plain backdrop.
-        Active tiles (current paste mode) get a tinted body + stronger rim.
+        """Frosted card: solid body + thin accent rim + soft drop shadow.
+
+        The body is opaque because Tk canvases cannot alpha-blend, and the
+        tile has to stay readable on top of the glass wallpaper. Active tiles
+        (current paste mode) get an accent-tinted body + a stronger rim.
         """
         radius = half * 0.44
+        if active:
+            colors = themes.active_tile_colors(self.mode, active_fill or accent)
+            width = 2.4
+        else:
+            colors = themes.tile_colors(self.mode, accent)
+            width = 1.8
         # faint floating shadow
         _rounded_rect(
             canvas,
@@ -366,21 +562,10 @@ class RadialMenuPanel(tk.Frame):
             ix + half - 2,
             iy + half + 6,
             radius,
-            fill=_mix(_BASE, _SHADOW, 0.5),
+            fill=colors["shadow"],
             outline="",
             tags=tags,
         )
-        if active:
-            fill_color = active_fill or accent
-            body = _tint(fill_color, 0.72)
-            outline = fill_color
-            width = 2.4
-            text_fill = glyph_fill or "#FFFFFF"
-        else:
-            body = _mix(_BASE, accent, 0.06)
-            outline = _mix(_BASE, accent, 0.7)
-            width = 1.6
-            text_fill = glyph_fill or _mix(accent, "#2A2A30", 0.1)
         _rounded_rect(
             canvas,
             ix - half,
@@ -388,8 +573,8 @@ class RadialMenuPanel(tk.Frame):
             ix + half,
             iy + half,
             radius,
-            fill=body,
-            outline=outline,
+            fill=body or colors["body"],
+            outline=colors["rim"],
             width=width,
             tags=tags,
         )
@@ -399,7 +584,7 @@ class RadialMenuPanel(tk.Frame):
             iy - half + 1.5,
             ix - half * 0.1,
             iy - half + 1.5,
-            fill=_mix(outline, _HILITE, 0.6),
+            fill=colors["hilite"],
             width=1,
             tags=tags,
         )
@@ -407,7 +592,7 @@ class RadialMenuPanel(tk.Frame):
             ix,
             iy,
             text=glyph,
-            fill=text_fill,
+            fill=glyph_fill or colors["glyph"],
             font=("Segoe UI Symbol", int(half * 0.95), "bold"),
             tags=tags,
         )
@@ -451,6 +636,8 @@ class RadialMenuPanel(tk.Frame):
         on a right-click reaching the canvas.
         """
         radius = half * 0.44
+        pal = self._pal
+        colors = themes.tile_colors(self.mode, accent)
         _rounded_rect(
             canvas,
             ix - half + 2,
@@ -458,12 +645,10 @@ class RadialMenuPanel(tk.Frame):
             ix + half - 2,
             iy + half + 6,
             radius,
-            fill=_mix(_BASE, _SHADOW, 0.5),
+            fill=colors["shadow"],
             outline="",
             tags=tags,
         )
-        body = _mix(_BASE, accent, 0.06)
-        outline = _mix(_BASE, accent, 0.7)
         _rounded_rect(
             canvas,
             ix - half,
@@ -471,9 +656,9 @@ class RadialMenuPanel(tk.Frame):
             ix + half,
             iy + half,
             radius,
-            fill=body,
-            outline=outline,
-            width=1.6,
+            fill=colors["body"],
+            outline=colors["rim"],
+            width=1.8,
             tags=tags,
         )
         canvas.create_line(
@@ -481,7 +666,7 @@ class RadialMenuPanel(tk.Frame):
             iy - half + 1.5,
             ix - half * 0.1,
             iy - half + 1.5,
-            fill=_mix(outline, _HILITE, 0.6),
+            fill=colors["hilite"],
             width=1,
             tags=tags,
         )
@@ -489,7 +674,7 @@ class RadialMenuPanel(tk.Frame):
             ix,
             iy - half * 0.42,
             text=glyph,
-            fill=_mix(accent, "#2A2A30", 0.1),
+            fill=colors["glyph"],
             font=("Segoe UI Symbol", max(11, int(half * 0.62)), "bold"),
             tags=tags,
         )
@@ -498,7 +683,7 @@ class RadialMenuPanel(tk.Frame):
             iy - half * 0.02,
             ix,
             iy + half * 0.9,
-            fill=_mix(_BASE, outline, 0.7),
+            fill=pal["divider"],
             width=1,
             tags=tags,
         )
@@ -511,8 +696,8 @@ class RadialMenuPanel(tk.Frame):
                 bx + bw / 2,
                 by + bh / 2,
                 min(bw, bh) * 0.34,
-                fill=accent if increase else _mix(_BASE, "#8E8E93", 0.24),
-                outline=accent if increase else _mix(_BASE, "#8E8E93", 0.55),
+                fill=accent if increase else pal["minus_body"],
+                outline=accent if increase else pal["minus_rim"],
                 width=1.4,
                 tags=tags,
             )
@@ -520,7 +705,7 @@ class RadialMenuPanel(tk.Frame):
                 bx,
                 by,
                 text="＋" if increase else "－",
-                fill="#FFFFFF" if increase else _mix("#8E8E93", "#2A2A30", 0.3),
+                fill="#FFFFFF" if increase else pal["minus_text"],
                 font=("Microsoft YaHei UI", max(10, int(half * 0.56)), "bold"),
                 tags=tags,
             )
@@ -534,11 +719,27 @@ class RadialMenuPanel(tk.Frame):
 
         cx, cy = self._center_x, self._center_y
         r = self._radius
+        pal = self._pal
+        accents = themes.tile_accents(self.mode)
+
+        # Glass wallpaper for the current 风格 × 明暗 combination, centred so a
+        # smaller window simply crops it. Falls back to the flat palette base
+        # if the asset is missing so the wheel never renders without a backdrop.
+        image = self._background_image()
+        if image is not None:
+            canvas.configure(bg=self._bg_color)
+            canvas.create_image(
+                self._cw / 2,
+                self._ch / 2,
+                image=image,
+                anchor="center",
+                tags="bg",
+            )
+        else:
+            canvas.configure(bg=pal["base"])
+
         if r <= 0:
             return
-
-        # Clean frosted base (no colour blobs) so tiles read as transparent.
-        canvas.configure(bg=_BASE)
 
         n = len(self.items)
         icon_radius = r * 0.20
@@ -550,7 +751,7 @@ class RadialMenuPanel(tk.Frame):
             cy - item_r,
             cx + item_r,
             cy + item_r,
-            outline=_mix(_BASE, "#B9C1D4", 0.35),
+            outline=pal["orbit"],
             width=1,
         )
 
@@ -558,7 +759,7 @@ class RadialMenuPanel(tk.Frame):
             angle = (2 * math.pi * index / n) - math.pi / 2
             ix, iy = self._item_center(index)
 
-            accent = ITEM_ACCENTS[index % len(ITEM_ACCENTS)]
+            accent = accents[index % len(accents)]
 
             if item.action_type in SPLIT_ACTIONS:
                 # 亮度 / 对比度：一个磁贴分成 ＋、－ 两个可点区域
@@ -580,9 +781,9 @@ class RadialMenuPanel(tk.Frame):
 
                 if active:
                     active_fill = (
-                        COLORS["paste_enhanced"]
+                        self._accents["paste_enhanced"]
                         if item.action_type == "set_paste_enhanced"
-                        else COLORS["paste_normal"]
+                        else self._accents["paste_normal"]
                     )
                     self._draw_tile(
                         canvas,
@@ -606,7 +807,7 @@ class RadialMenuPanel(tk.Frame):
                         tags=f"item_{index}",
                     )
 
-            # Label: transparent pill (body matches base, hairline only).
+            # Label: frosted pill matching the tile accent.
             # 1.14r keeps the pill clear of the tile rim in the compact window.
             label_r = r * 1.14
             lx = cx + label_r * math.cos(angle)
@@ -616,6 +817,7 @@ class RadialMenuPanel(tk.Frame):
             text_w = len(label_text) * 13 + 26
             text_h = 26
             corner = text_h / 2
+            label_cols = themes.label_colors(self.mode, accent)
 
             _rounded_rect(
                 canvas,
@@ -624,8 +826,8 @@ class RadialMenuPanel(tk.Frame):
                 lx + text_w / 2,
                 ly + text_h / 2,
                 corner,
-                fill=_mix(_BASE, accent, 0.05),
-                outline=_mix(_BASE, accent, 0.5),
+                fill=label_cols["body"],
+                outline=label_cols["rim"],
                 width=1,
                 tags=f"item_{index}",
             )
@@ -633,29 +835,30 @@ class RadialMenuPanel(tk.Frame):
                 lx,
                 ly,
                 text=label_text,
-                fill=COLORS["label_fg"],
+                fill=label_cols["text"],
                 font=("Microsoft YaHei UI", 10, "bold"),
                 tags=f"item_{index}",
             )
 
-        # Central transparent hub (settings)
+        # Central frosted hub (settings)
         close_r = self._inner_radius
         self._draw_tile(
             canvas,
             cx,
             cy,
             close_r,
-            COLORS["hover"],
+            self._accents["hover"],
             "⚙",
             tags="center",
-            glyph_fill=COLORS["center_fg"],
+            body=pal["hub_body"],
+            glyph_fill=pal["hub_glyph"],
         )
         # 中心 ⚙ 下方的小字：轮盘只放快捷动作，其余都在设置页
         canvas.create_text(
             cx,
             cy + close_r * 1.85,
             text="更多设置",
-            fill=COLORS["center_fg"],
+            fill=pal["hub_text"],
             font=("Microsoft YaHei UI", 8),
             tags="center",
         )
@@ -674,8 +877,21 @@ class RadialMenuPanel(tk.Frame):
         r = self._radius
         ix, iy = self._item_center(index)
         half = r * 0.20
-        accent = ITEM_ACCENTS[index % len(ITEM_ACCENTS)]
+        accents = themes.tile_accents(self.mode)
+        accent = accents[index % len(accents)]
 
+        _rounded_rect(
+            self._canvas,
+            ix - half - 5.5,
+            iy - half - 5.5,
+            ix + half + 5.5,
+            iy + half + 5.5,
+            half * 0.52,
+            fill="",
+            outline=self._pal["ring"],
+            width=2,
+            tags="hover_ring",
+        )
         _rounded_rect(
             self._canvas,
             ix - half - 4,
@@ -703,7 +919,7 @@ class RadialMenuPanel(tk.Frame):
                     by + bh / 2 + 2.5,
                     min(bw, bh) * 0.4,
                     fill="",
-                    outline=_mix(accent, "#2A2A30", 0.25),
+                    outline=_mix(accent, self._pal["status_text"], 0.25),
                     width=2,
                     tags="hover_ring",
                 )

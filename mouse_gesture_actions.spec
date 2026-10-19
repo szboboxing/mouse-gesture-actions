@@ -20,7 +20,11 @@ a = Analysis(
     ["main.py"],
     pathex=[],
     binaries=[],
-    datas=[("assets/mouse_gesture.ico", "assets")],
+    datas=[
+        ("assets/mouse_gesture.ico", "assets"),
+        # 轮盘玻璃壁纸（3 风格 × 明暗 2 模式，共 6 张 PNG，约 0.5MB）
+        ("assets/wallpapers", "assets/wallpapers"),
+    ],
     hiddenimports=[
         "pythoncom",
         "pywintypes",

@@ -16,6 +16,7 @@ from typing import Callable
 
 from actions import ActionResult, SystemActions
 from help_browser import open_help_browser
+import themes
 from mouse_hook import (
     GlobalRightButtonActionHook,
     HeldMouseAction,
@@ -462,6 +463,10 @@ class MouseGestureApp:
         y = max(0, (self.root.winfo_screenheight() - height) // 2)
         self.root.geometry(f"{width}x{height}+{x}+{y}")
         self.root.minsize(min(width, 600), min(height, 600))
+        # The glass wallpaper is a fixed 640x400 picture centred on the wheel
+        # canvas, so the compact window must not grow past it — otherwise flat
+        # background bands would appear around the picture.
+        self.root.maxsize(width, height)
         self.root.resizable(True, True)
 
     def _apply_full_geometry(self) -> None:
@@ -469,6 +474,12 @@ class MouseGestureApp:
         height = self._full_height
         self.root.minsize(min(1120, self.root.winfo_screenwidth()),
                            min(680, self.root.winfo_screenheight()))
+        # Release the compact wheel window's cap so the control panel can be
+        # resized freely again.
+        self.root.maxsize(
+            self.root.winfo_screenwidth(),
+            self.root.winfo_screenheight(),
+        )
         x = max(0, (self.root.winfo_screenwidth() - width) // 2)
         y = max(0, (self.root.winfo_screenheight() - height) // 2)
         self.root.geometry(f"{width}x{height}+{x}+{y}")
@@ -529,7 +540,10 @@ class MouseGestureApp:
             self._view_container, bg=COLORS["page"]
         )
         self._radial_view = tk.Frame(
-            self._view_container, bg=RADIAL_COLORS["bg"]
+            self._view_container,
+            bg=themes.palette(
+                themes.normalize_mode(self.settings.wheel_mode)
+            )["base"],
         )
 
         self._build_main_view(self._main_view)
@@ -541,12 +555,17 @@ class MouseGestureApp:
 
     def _build_radial_view(self, parent: tk.Frame) -> None:
         items = self._get_radial_menu_items()
+        style = themes.normalize_style(self.settings.wheel_style)
+        mode = themes.normalize_mode(self.settings.wheel_mode)
+        edges = themes.wallpaper_edges(style, mode)
 
         self.clipboard_panel = ClipboardHistoryPanel(
             parent,
             store=self.clipboard_store,
             on_status=self._on_clipboard_status,
             on_toggle=self._on_clipboard_toggle,
+            mode=mode,
+            panel_bg=edges["bottom"],
         )
         self.clipboard_panel.pack(side="bottom", fill="x")
 
@@ -555,6 +574,9 @@ class MouseGestureApp:
             on_item_selected=self._on_radial_item_selected,
             on_settings=self._show_main_view,
             items=items,
+            style=style,
+            mode=mode,
+            on_theme_change=self._on_wheel_theme_change,
         )
         self.radial_panel.pack(fill="both", expand=True)
         self.radial_panel.set_status("正在初始化", RADIAL_COLORS["status_orange"])
@@ -562,6 +584,25 @@ class MouseGestureApp:
 
         # Sync the clipboard recorder with the persisted preference.
         self.clipboard_panel.set_enabled(self.settings.clipboard_history_enabled)
+
+    def _on_wheel_theme_change(self, style: str, mode: str) -> None:
+        """「风格」/「明暗」 clicked: repaint the strip and remember the choice."""
+        self.settings.wheel_style = themes.normalize_style(style)
+        self.settings.wheel_mode = themes.normalize_mode(mode)
+        try:
+            self.settings.save()
+        except OSError:
+            pass
+        saved_mode = self.settings.wheel_mode
+        edges = themes.wallpaper_edges(self.settings.wheel_style, saved_mode)
+        if self.clipboard_panel is not None:
+            self.clipboard_panel.set_theme(saved_mode, edges["bottom"])
+        self._radial_view.configure(bg=themes.palette(saved_mode)["base"])
+        self._show_toast(
+            f"轮盘外观：{themes.style_label(self.settings.wheel_style)} · "
+            f"{themes.mode_label(saved_mode)}",
+            themes.accent_colors(saved_mode)["hover"],
+        )
 
     def _on_clipboard_toggle(self, enabled: bool) -> None:
         self.settings.clipboard_history_enabled = bool(enabled)

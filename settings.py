@@ -7,6 +7,9 @@ from pathlib import Path
 from typing import Any
 
 
+import themes
+from themes import DEFAULT_WHEEL_MODE, DEFAULT_WHEEL_STYLE
+
 CONFIG_DIR = Path(os.environ.get("APPDATA", Path.home())) / "MouseGestureActions"
 CONFIG_PATH = CONFIG_DIR / "settings.json"
 DEFAULT_SCREENSHOT_SIDE_BUTTONS = ("xbutton1", "xbutton2")
@@ -212,6 +215,8 @@ class AppSettings:
     minimize_on_start: bool = False
     show_radial_menu_on_start: bool = True
     clipboard_history_enabled: bool = True
+    wheel_style: str = DEFAULT_WHEEL_STYLE
+    wheel_mode: str = DEFAULT_WHEEL_MODE
     screenshot_side_buttons: tuple[str, ...] = DEFAULT_SCREENSHOT_SIDE_BUTTONS
     custom_button_name: str = "自定义"
     custom_button_target: str = ""
@@ -264,6 +269,9 @@ class AppSettings:
             settings.custom_button_target
         ).strip()
         settings.ai_tool_target = str(settings.ai_tool_target).strip()
+        # 轮盘外观：非法值（旧版本、手改配置）一律回落到默认玻璃风格
+        settings.wheel_style = themes.normalize_style(settings.wheel_style)
+        settings.wheel_mode = themes.normalize_mode(settings.wheel_mode)
         settings.keyboard_mappings = _normalize_keyboard_mappings(
             raw_keyboard_mappings
         )

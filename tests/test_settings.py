@@ -220,6 +220,28 @@ class SettingsTests(unittest.TestCase):
         self.assertTrue(settings.keyboard_mappings[0].enabled)
         self.assertFalse(settings.keyboard_mappings[1].enabled)
 
+    def test_wheel_appearance_defaults_to_light_frost(self) -> None:
+        settings = AppSettings.from_mapping({})
+
+        self.assertEqual(settings.wheel_style, "frost")
+        self.assertEqual(settings.wheel_mode, "light")
+
+    def test_wheel_appearance_choices_are_persisted(self) -> None:
+        settings = AppSettings.from_mapping(
+            {"wheel_style": "pastel", "wheel_mode": "dark"}
+        )
+
+        self.assertEqual(settings.wheel_style, "pastel")
+        self.assertEqual(settings.wheel_mode, "dark")
+
+    def test_unknown_wheel_appearance_values_fall_back_to_defaults(self) -> None:
+        settings = AppSettings.from_mapping(
+            {"wheel_style": "neon", "wheel_mode": True}
+        )
+
+        self.assertEqual(settings.wheel_style, "frost")
+        self.assertEqual(settings.wheel_mode, "light")
+
 
 if __name__ == "__main__":
     unittest.main()

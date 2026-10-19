@@ -21,7 +21,7 @@ from typing import Callable
 
 import tkinter as tk
 
-from radial_menu import COLORS
+import themes
 from settings import CONFIG_DIR
 
 CLIPBOARD_HISTORY_PATH = CONFIG_DIR / "clipboard_history.json"
@@ -237,8 +237,9 @@ class ClipboardHistoryPanel(tk.Frame):
         store: ClipboardHistoryStore,
         on_status: Callable[[str], None] | None = None,
         on_toggle: Callable[[bool], None] | None = None,
+        mode: str = "light",
+        panel_bg: str | None = None,
     ) -> None:
-        super().__init__(parent, bg=COLORS["bg"])
         self.store = store
         self.on_status = on_status
         self.on_toggle = on_toggle
@@ -247,22 +248,52 @@ class ClipboardHistoryPanel(tk.Frame):
         self._last_seq: int | None = None
         self._after_id: str | None = None
         self._row_buttons: list[tk.Button] = []
+        self._theme(mode, panel_bg)
 
+        super().__init__(parent, bg=self._pal["panel_bg"])
+        self._build()
+
+    # ---- theme ----------------------------------------------------------
+    def _theme(self, mode: str, panel_bg: str | None) -> None:
+        """Pick the light/dark palette and blend with the wallpaper's own edge."""
+        self.mode = themes.normalize_mode(mode)
+        pal = themes.palette(self.mode)
+        accents = themes.accent_colors(self.mode)
+        edge = panel_bg or pal["base"]
+        # Rows / pills keep their own solid colour, but the panel background is
+        # the wallpaper's bottom edge so the strip continues the glass picture.
+        pal["panel_bg"] = edge
+        pal["row_body"] = themes.mix(pal["row_body"], edge, 0.18)
+        pal["row_hover"] = themes.mix(pal["row_hover"], edge, 0.18)
+        pal["pill_body"] = themes.mix(pal["pill_body"], edge, 0.18)
+        pal["pill_hover"] = themes.mix(pal["pill_hover"], edge, 0.25)
+        self._pal = pal
+        self._accent = accents
+
+    def set_theme(self, mode: str, panel_bg: str | None = None) -> None:
+        """Re-paint the strip for the wheel's current 明暗 mode."""
+        self._theme(mode, panel_bg)
+        self.configure(bg=self._pal["panel_bg"])
+        for child in self.winfo_children():
+            child.destroy()
+        self._row_buttons.clear()
         self._build()
 
     def _build(self) -> None:
-        tk.Frame(self, bg=COLORS["top_bar_border"], height=1).pack(
+        pal = self._pal
+        bg = pal["panel_bg"]
+        tk.Frame(self, bg=pal["top_bar_border"], height=1).pack(
             fill="x", side="top"
         )
 
-        header = tk.Frame(self, bg=COLORS["bg"])
+        header = tk.Frame(self, bg=bg)
         header.pack(fill="x", side="top", padx=20, pady=(10, 4))
 
         tk.Label(
             header,
             text="剪贴板历史",
-            bg=COLORS["bg"],
-            fg=COLORS["status_text"],
+            bg=bg,
+            fg=pal["status_text"],
             font=("Microsoft YaHei UI", 11, "bold"),
         ).pack(side="left")
 
@@ -283,33 +314,34 @@ class ClipboardHistoryPanel(tk.Frame):
         self._hint = tk.Label(
             header,
             text="",
-            bg=COLORS["bg"],
-            fg=COLORS["status_muted"],
+            bg=bg,
+            fg=pal["status_muted"],
             font=("Microsoft YaHei UI", 9),
         )
         self._hint.pack(side="right", padx=(0, 12))
 
-        self._list = tk.Frame(self, bg=COLORS["bg"])
+        self._list = tk.Frame(self, bg=bg)
         self._list.pack(fill="x", side="top", padx=16, pady=(0, 12))
 
         self._refresh_enabled_button()
         self.refresh()
 
     def _pill(self, parent: tk.Misc, text: str, command) -> tk.Button:
+        pal = self._pal
         return tk.Button(
             parent,
             text=text,
             command=command,
-            bg=COLORS["card"],
-            fg=COLORS["hover"],
-            activebackground=COLORS["icon_accent"] if False else "#D7E8FF",
-            activeforeground=COLORS["hover"],
+            bg=pal["pill_body"],
+            fg=pal["pill_text"],
+            activebackground=pal["pill_hover"],
+            activeforeground=pal["pill_text"],
             relief="flat",
             bd=0,
             cursor="hand2",
             highlightthickness=1,
-            highlightbackground=COLORS["top_bar_border"],
-            highlightcolor=COLORS["top_bar_border"],
+            highlightbackground=pal["pill_rim"],
+            highlightcolor=pal["pill_rim"],
             font=("Microsoft YaHei UI", 10, "bold"),
             padx=12,
             pady=4,
@@ -371,8 +403,8 @@ class ClipboardHistoryPanel(tk.Frame):
                 text="（暂无记录，复制任意文本后这里会显示）"
                 if self.enabled
                 else "（记录已暂停）",
-                bg=COLORS["bg"],
-                fg=COLORS["status_muted"],
+                bg=self._pal["panel_bg"],
+                fg=self._pal["status_muted"],
                 font=("Microsoft YaHei UI", 10),
                 anchor="w",
             )
@@ -388,22 +420,23 @@ class ClipboardHistoryPanel(tk.Frame):
         preview = _shorten(entry.text, 64)
         stamp = time.strftime("%H:%M", time.localtime(entry.ts))
         label = f"  {index + 1}.  {preview}    ·  {stamp}"
+        pal = self._pal
         btn = tk.Button(
             self._list,
             text=label,
             command=lambda e=entry: self._use_entry(e),
             anchor="w",
             justify="left",
-            bg=COLORS["card"],
-            fg=COLORS["status_text"],
-            activebackground="#D7E8FF",
-            activeforeground=COLORS["status_text"],
+            bg=pal["row_body"],
+            fg=pal["row_text"],
+            activebackground=pal["row_hover"],
+            activeforeground=pal["row_text"],
             relief="flat",
             bd=0,
             cursor="hand2",
             highlightthickness=1,
-            highlightbackground=COLORS["top_bar_border"],
-            highlightcolor=COLORS["top_bar_border"],
+            highlightbackground=pal["pill_rim"],
+            highlightcolor=pal["pill_rim"],
             font=("Microsoft YaHei UI", 10),
             padx=10,
             pady=5,
@@ -411,12 +444,15 @@ class ClipboardHistoryPanel(tk.Frame):
         btn.pack(fill="x", pady=2)
         btn.bind(
             "<Enter>",
-            lambda _e, b=btn: b.configure(highlightcolor=COLORS["hover"]),
+            lambda _e, b=btn: b.configure(
+                highlightcolor=self._accent["hover"], bg=self._pal["row_hover"]
+            ),
         )
         btn.bind(
             "<Leave>",
             lambda _e, b=btn: b.configure(
-                highlightcolor=COLORS["top_bar_border"]
+                highlightcolor=self._pal["pill_rim"],
+                bg=self._pal["row_body"],
             ),
         )
         self._row_buttons.append(btn)
@@ -438,21 +474,27 @@ class ClipboardHistoryPanel(tk.Frame):
         self._set_hint("已清空记录")
 
     def _refresh_enabled_button(self) -> None:
+        pal = self._pal
         if self.enabled:
+            success = self._accent["success"]
             self._enable_btn.configure(
                 text="记录：已开启",
                 fg="#FFFFFF",
-                bg=COLORS["icon_success"],
-                activebackground=COLORS["icon_success"],
+                bg=success,
+                activebackground=themes.mix(success, pal["panel_bg"], 0.2),
                 activeforeground="#FFFFFF",
+                highlightbackground=success,
+                highlightcolor=success,
             )
         else:
             self._enable_btn.configure(
                 text="记录：已暂停",
-                fg=COLORS["status_muted"],
-                bg=COLORS["card"],
-                activebackground="#D7E8FF",
-                activeforeground=COLORS["status_muted"],
+                fg=pal["status_muted"],
+                bg=pal["pill_body"],
+                activebackground=pal["pill_hover"],
+                activeforeground=pal["status_muted"],
+                highlightbackground=pal["pill_rim"],
+                highlightcolor=pal["pill_rim"],
             )
         self.refresh()
 
