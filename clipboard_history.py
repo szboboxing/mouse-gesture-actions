@@ -266,13 +266,14 @@ class ClipboardHistoryPanel(tk.Frame):
             font=("Microsoft YaHei UI", 11, "bold"),
         ).pack(side="left")
 
+        # 最右侧为「清空」，其左侧为「More」（V2.6.2 与旧版互换位置）
+        self._clear_btn = self._pill(header, "清空", self._clear)
+        self._clear_btn.pack(side="right")
+
         self._more_btn = self._pill(
             header, "More ▾", self.toggle_more
         )
-        self._more_btn.pack(side="right")
-
-        self._clear_btn = self._pill(header, "清空", self._clear)
-        self._clear_btn.pack(side="right", padx=(0, 8))
+        self._more_btn.pack(side="right", padx=(0, 8))
 
         self._enable_btn = self._pill(
             header, "", self.toggle_enabled

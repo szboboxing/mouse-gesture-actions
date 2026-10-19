@@ -48,7 +48,7 @@ DEFAULT_RADIAL_ITEMS: tuple[RadialItem, ...] = (
         label="对比度",
         icon_text="◐",
         action_type="contrast",
-        description="左键提高对比度，右键降低对比度",
+        description="点左半「＋」提高对比度，点右半「－」降低对比度",
     ),
     RadialItem(
         label="AI 工具",
@@ -60,7 +60,7 @@ DEFAULT_RADIAL_ITEMS: tuple[RadialItem, ...] = (
         label="亮度",
         icon_text="☀",
         action_type="brightness",
-        description="左键提高屏幕亮度，右键降低屏幕亮度",
+        description="点左半「＋」提高屏幕亮度，点右半「－」降低屏幕亮度",
     ),
     RadialItem(
         label="浏览器",
@@ -122,6 +122,13 @@ ITEM_ACCENTS: tuple[str, ...] = (
     COLORS["icon_indigo"],  # 浏览器 (靛蓝)
     COLORS["hover"],        # 计算器
 )
+
+# Tiles whose icon is split into two independent halves: the left half is the
+# 「＋」button and the right half is the 「－」button. Both halves respond to the
+# left mouse button. The previous 「右键减」 gesture could not be relied on: the
+# global low-level hook consumes WM_RBUTTONDOWN while a right-held gesture is
+# active, so a right-click on the wheel did not always reach the canvas.
+SPLIT_ACTIONS = frozenset({"brightness", "contrast"})
 
 
 def _mix(color_a: str, color_b: str, t: float) -> str:
@@ -186,7 +193,7 @@ class RadialMenuPanel(tk.Frame):
         self._inner_radius: float = 0
         self._cw: int = 0
         self._ch: int = 0
-        self._hovered_index: int = -1
+        self._hovered_key: tuple[int, int] = (-1, 0)
         self._status_var: tk.StringVar = tk.StringVar(value="正在初始化")
         self._status_dot_color: str = COLORS["status_orange"]
         self._paste_enhanced: bool | None = None
@@ -224,13 +231,13 @@ class RadialMenuPanel(tk.Frame):
             textvariable=self._status_var,
             bg=COLORS["top_bar"],
             fg=COLORS["status_text"],
-            font=("Microsoft YaHei UI", 12, "bold"),
+            font=("Microsoft YaHei UI", 11, "bold"),
         ).pack(side="left")
 
         # Glass settings pill
         settings_btn = tk.Button(
             top_bar,
-            text="⚙  设置",
+            text="⚙  更多设置",
             command=self._handle_settings,
             bg=_tint(COLORS["hover"], 0.82),
             fg=COLORS["hover"],
@@ -405,6 +412,119 @@ class RadialMenuPanel(tk.Frame):
             tags=tags,
         )
 
+    def _item_center(self, index: int) -> tuple[float, float]:
+        """Tile centre for a wheel index using the same layout maths as drawing."""
+        angle = (2 * math.pi * index / len(self.items)) - math.pi / 2
+        item_r = self._radius * 0.72
+        return (
+            self._center_x + item_r * math.cos(angle),
+            self._center_y + item_r * math.sin(angle),
+        )
+
+    @staticmethod
+    def _split_button_boxes(
+        ix: float,
+        iy: float,
+        half: float,
+    ) -> tuple[tuple[int, float, float, float, float], ...]:
+        """Return (sign, centre_x, centre_y, width, height) for the ＋/－ halves."""
+        return (
+            (1, ix - half * 0.5, iy + half * 0.42, half * 0.88, half * 0.72),
+            (-1, ix + half * 0.5, iy + half * 0.42, half * 0.88, half * 0.72),
+        )
+
+    def _draw_split_tile(
+        self,
+        canvas: tk.Canvas,
+        ix: float,
+        iy: float,
+        half: float,
+        accent: str,
+        glyph: str,
+        tags: str,
+    ) -> None:
+        """Brightness / contrast tile: one body, two clickable parts.
+
+        The function glyph stays on the upper part of the tile, while the lower
+        part is divided into a 「＋」button (left) and a 「－」button (right). Both
+        parts work with the left mouse button, so decreasing no longer depends
+        on a right-click reaching the canvas.
+        """
+        radius = half * 0.44
+        _rounded_rect(
+            canvas,
+            ix - half + 2,
+            iy - half + 5,
+            ix + half - 2,
+            iy + half + 6,
+            radius,
+            fill=_mix(_BASE, _SHADOW, 0.5),
+            outline="",
+            tags=tags,
+        )
+        body = _mix(_BASE, accent, 0.06)
+        outline = _mix(_BASE, accent, 0.7)
+        _rounded_rect(
+            canvas,
+            ix - half,
+            iy - half,
+            ix + half,
+            iy + half,
+            radius,
+            fill=body,
+            outline=outline,
+            width=1.6,
+            tags=tags,
+        )
+        canvas.create_line(
+            ix - half + radius,
+            iy - half + 1.5,
+            ix - half * 0.1,
+            iy - half + 1.5,
+            fill=_mix(outline, _HILITE, 0.6),
+            width=1,
+            tags=tags,
+        )
+        canvas.create_text(
+            ix,
+            iy - half * 0.42,
+            text=glyph,
+            fill=_mix(accent, "#2A2A30", 0.1),
+            font=("Segoe UI Symbol", max(11, int(half * 0.62)), "bold"),
+            tags=tags,
+        )
+        canvas.create_line(
+            ix,
+            iy - half * 0.02,
+            ix,
+            iy + half * 0.9,
+            fill=_mix(_BASE, outline, 0.7),
+            width=1,
+            tags=tags,
+        )
+        for sign, bx, by, bw, bh in self._split_button_boxes(ix, iy, half):
+            increase = sign > 0
+            _rounded_rect(
+                canvas,
+                bx - bw / 2,
+                by - bh / 2,
+                bx + bw / 2,
+                by + bh / 2,
+                min(bw, bh) * 0.34,
+                fill=accent if increase else _mix(_BASE, "#8E8E93", 0.24),
+                outline=accent if increase else _mix(_BASE, "#8E8E93", 0.55),
+                width=1.4,
+                tags=tags,
+            )
+            canvas.create_text(
+                bx,
+                by,
+                text="＋" if increase else "－",
+                fill="#FFFFFF" if increase else _mix("#8E8E93", "#2A2A30", 0.3),
+                font=("Microsoft YaHei UI", max(10, int(half * 0.56)), "bold"),
+                tags=tags,
+            )
+
     def _draw_menu(self) -> None:
         canvas = self._canvas
         if canvas is None:
@@ -436,24 +556,13 @@ class RadialMenuPanel(tk.Frame):
 
         for index, item in enumerate(self.items):
             angle = (2 * math.pi * index / n) - math.pi / 2
-            ix = cx + item_r * math.cos(angle)
-            iy = cy + item_r * math.sin(angle)
+            ix, iy = self._item_center(index)
 
             accent = ITEM_ACCENTS[index % len(ITEM_ACCENTS)]
 
-            active = None
-            if item.action_type == "set_paste_enhanced":
-                active = self._paste_enhanced is True
-            elif item.action_type == "set_paste_normal":
-                active = self._paste_enhanced is False
-
-            if active:
-                active_fill = (
-                    COLORS["paste_enhanced"]
-                    if item.action_type == "set_paste_enhanced"
-                    else COLORS["paste_normal"]
-                )
-                self._draw_tile(
+            if item.action_type in SPLIT_ACTIONS:
+                # 亮度 / 对比度：一个磁贴分成 ＋、－ 两个可点区域
+                self._draw_split_tile(
                     canvas,
                     ix,
                     iy,
@@ -461,31 +570,51 @@ class RadialMenuPanel(tk.Frame):
                     accent,
                     item.icon_text,
                     tags=f"item_{index}",
-                    active=True,
-                    active_fill=active_fill,
                 )
             else:
-                self._draw_tile(
-                    canvas,
-                    ix,
-                    iy,
-                    icon_radius,
-                    accent,
-                    item.icon_text,
-                    tags=f"item_{index}",
-                )
+                active = None
+                if item.action_type == "set_paste_enhanced":
+                    active = self._paste_enhanced is True
+                elif item.action_type == "set_paste_normal":
+                    active = self._paste_enhanced is False
 
-            # Label: transparent pill (body matches base, hairline only)
-            label_r = r * 1.08
+                if active:
+                    active_fill = (
+                        COLORS["paste_enhanced"]
+                        if item.action_type == "set_paste_enhanced"
+                        else COLORS["paste_normal"]
+                    )
+                    self._draw_tile(
+                        canvas,
+                        ix,
+                        iy,
+                        icon_radius,
+                        accent,
+                        item.icon_text,
+                        tags=f"item_{index}",
+                        active=True,
+                        active_fill=active_fill,
+                    )
+                else:
+                    self._draw_tile(
+                        canvas,
+                        ix,
+                        iy,
+                        icon_radius,
+                        accent,
+                        item.icon_text,
+                        tags=f"item_{index}",
+                    )
+
+            # Label: transparent pill (body matches base, hairline only).
+            # 1.14r keeps the pill clear of the tile rim in the compact window.
+            label_r = r * 1.14
             lx = cx + label_r * math.cos(angle)
             ly = cy + label_r * math.sin(angle)
 
             label_text = item.label
-            has_hint = item.action_type in ("brightness", "contrast")
             text_w = len(label_text) * 13 + 26
-            if has_hint:
-                text_w += 46
-            text_h = 28
+            text_h = 26
             corner = text_h / 2
 
             _rounded_rect(
@@ -500,35 +629,14 @@ class RadialMenuPanel(tk.Frame):
                 width=1,
                 tags=f"item_{index}",
             )
-            if has_hint:
-                # Label on the left, ＋/－ hint on the right of the pill.
-                canvas.create_text(
-                    lx - 23,
-                    ly,
-                    text=label_text,
-                    fill=COLORS["label_fg"],
-                    font=("Microsoft YaHei UI", 10, "bold"),
-                    tags=f"item_{index}",
-                    anchor="e",
-                )
-                canvas.create_text(
-                    lx + 23,
-                    ly,
-                    text="＋/－",
-                    fill=_mix(accent, "#2A2A30", 0.1),
-                    font=("Microsoft YaHei UI", 9, "bold"),
-                    tags=f"item_{index}",
-                    anchor="w",
-                )
-            else:
-                canvas.create_text(
-                    lx,
-                    ly,
-                    text=label_text,
-                    fill=COLORS["label_fg"],
-                    font=("Microsoft YaHei UI", 10, "bold"),
-                    tags=f"item_{index}",
-                )
+            canvas.create_text(
+                lx,
+                ly,
+                text=label_text,
+                fill=COLORS["label_fg"],
+                font=("Microsoft YaHei UI", 10, "bold"),
+                tags=f"item_{index}",
+            )
 
         # Central transparent hub (settings)
         close_r = self._inner_radius
@@ -542,25 +650,29 @@ class RadialMenuPanel(tk.Frame):
             tags="center",
             glyph_fill=COLORS["center_fg"],
         )
+        # 中心 ⚙ 下方的小字：轮盘只放快捷动作，其余都在设置页
+        canvas.create_text(
+            cx,
+            cy + close_r * 1.85,
+            text="更多设置",
+            fill=COLORS["center_fg"],
+            font=("Microsoft YaHei UI", 8),
+            tags="center",
+        )
 
     def _on_motion(self, event: tk.Event) -> None:
-        index = self._hit_test(event.x, event.y)
-        if index != self._hovered_index:
+        index, sign = self._hit_test(event.x, event.y)
+        if (index, sign) != self._hovered_key:
             self._clear_hover()
-            self._hovered_index = index
+            self._hovered_key = (index, sign)
             if index >= 0:
-                self._draw_hover(index)
+                self._draw_hover(index, sign)
 
-    def _draw_hover(self, index: int) -> None:
+    def _draw_hover(self, index: int, sign: int = 0) -> None:
         if self._canvas is None:
             return
-        n = len(self.items)
-        angle = (2 * math.pi * index / n) - math.pi / 2
         r = self._radius
-        cx, cy = self._center_x, self._center_y
-        item_r = r * 0.72
-        ix = cx + item_r * math.cos(angle)
-        iy = cy + item_r * math.sin(angle)
+        ix, iy = self._item_center(index)
         half = r * 0.20
         accent = ITEM_ACCENTS[index % len(ITEM_ACCENTS)]
 
@@ -576,11 +688,30 @@ class RadialMenuPanel(tk.Frame):
             width=2,
             tags="hover_ring",
         )
+        if sign and self.items[index].action_type in SPLIT_ACTIONS:
+            # Highlight only the ＋ or － part under the pointer.
+            for button_sign, bx, by, bw, bh in self._split_button_boxes(
+                ix, iy, half
+            ):
+                if button_sign != sign:
+                    continue
+                _rounded_rect(
+                    self._canvas,
+                    bx - bw / 2 - 2.5,
+                    by - bh / 2 - 2.5,
+                    bx + bw / 2 + 2.5,
+                    by + bh / 2 + 2.5,
+                    min(bw, bh) * 0.4,
+                    fill="",
+                    outline=_mix(accent, "#2A2A30", 0.25),
+                    width=2,
+                    tags="hover_ring",
+                )
 
     def _clear_hover(self) -> None:
         if self._canvas is not None:
             self._canvas.delete("hover_ring")
-        self._hovered_index = -1
+        self._hovered_key = (-1, 0)
 
     def _on_leave(self, _event: tk.Event) -> None:
         self._clear_hover()
@@ -600,42 +731,45 @@ class RadialMenuPanel(tk.Frame):
                 self._handle_settings()
             return
 
-        index = self._hit_test(event.x, event.y)
-        if index >= 0 and self.on_item_selected is not None:
-            self.on_item_selected(self.items[index], right)
+        index, sign = self._hit_test(event.x, event.y)
+        if index < 0 or self.on_item_selected is None:
+            return
+        # sign < 0 → the 「－」 half; a legacy right-click also decreases.
+        self.on_item_selected(self.items[index], bool(right or sign < 0))
 
-    def _hit_test(self, x: float, y: float) -> int:
+    def _hit_test(self, x: float, y: float) -> tuple[int, int]:
+        """Return (item index, direction) — direction is +1, -1 or 0 (n/a)."""
         cx, cy = self._center_x, self._center_y
-        dx = x - cx
-        dy = y - cy
-        distance = math.hypot(dx, dy)
+        distance = math.hypot(x - cx, y - cy)
 
         inner_bound = self._inner_radius * 1.9
         outer_bound = self._radius * 1.18
-        if distance < inner_bound or distance > outer_bound:
-            return -1
+        if self._radius <= 0 or distance < inner_bound or distance > outer_bound:
+            return (-1, 0)
 
+        half = self._radius * 0.20
+        # Tiles sit on sector boundaries, so the nearest sector centre is the
+        # only candidate; fall back to a full scan keeps edge clicks reliable.
         n = len(self.items)
-        icon_radius = self._radius * 0.20
-        item_r = self._radius * 0.72
-
-        angle = math.atan2(dy, dx)
-        angle = angle + math.pi / 2
+        angle = math.atan2(y - cy, x - cx) + math.pi / 2
         if angle < 0:
             angle += 2 * math.pi
-
         sector_angle = 2 * math.pi / n
-        # Tiles are centred on sector boundaries (i * sector), so round to
-        # the nearest sector rather than floor — otherwise the half of each
-        # tile that leans toward the previous sector would map to the wrong
-        # index and fail the distance check (making it unclickable).
-        index = int(angle / sector_angle + 0.5) % n
+        candidates = [int(angle / sector_angle + 0.5) % n]
+        candidates += [i for i in range(n) if i not in candidates]
 
-        # Only register a hit near the tile body, not the label zone
-        item_angle = (2 * math.pi * index / n) - math.pi / 2
-        ix = cx + item_r * math.cos(item_angle)
-        iy = cy + item_r * math.sin(item_angle)
-        tile_dist = math.hypot(x - ix, y - iy)
-        if tile_dist > icon_radius * 1.4:
-            return -1
-        return index
+        for index in candidates:
+            ix, iy = self._item_center(index)
+            split = self.items[index].action_type in SPLIT_ACTIONS
+            if split:
+                for sign, bx, by, bw, bh in self._split_button_boxes(
+                    ix, iy, half
+                ):
+                    if abs(x - bx) <= bw / 2 and abs(y - by) <= bh / 2:
+                        return (index, sign)
+            if math.hypot(x - ix, y - iy) <= half * 1.4:
+                # Only register a hit near the tile body, not the label zone.
+                if split:
+                    return (index, 1 if x < ix else -1)
+                return (index, 0)
+        return (-1, 0)

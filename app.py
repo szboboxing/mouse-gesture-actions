@@ -442,8 +442,8 @@ class MouseGestureApp:
         self._full_height = min(900, max(700, screen_height - 90))
         self._full_width = min(self._full_width, screen_width)
         self._full_height = min(self._full_height, screen_height)
-        self._radial_width = min(960, screen_width - 40)
-        self._radial_height = min(960, screen_height - 80)
+        self._radial_width = min(640, screen_width - 40)
+        self._radial_height = min(660, screen_height - 80)
         self.root.configure(bg=COLORS["page"])
         self.root.option_add("*Font", ("Microsoft YaHei UI", 9))
         icon_path = resource_path("assets/mouse_gesture.ico")
@@ -461,7 +461,7 @@ class MouseGestureApp:
         x = max(0, (self.root.winfo_screenwidth() - width) // 2)
         y = max(0, (self.root.winfo_screenheight() - height) // 2)
         self.root.geometry(f"{width}x{height}+{x}+{y}")
-        self.root.minsize(min(width, 820), min(height, 640))
+        self.root.minsize(min(width, 600), min(height, 600))
         self.root.resizable(True, True)
 
     def _apply_full_geometry(self) -> None:
@@ -2952,12 +2952,12 @@ class MouseGestureApp:
         return tuple(items) if items else DEFAULT_RADIAL_ITEMS
 
     def _on_radial_item_selected(
-        self, item: RadialItem, right: bool = False
+        self, item: RadialItem, decrease: bool = False
     ) -> None:
         """Execute the action for a selected radial menu item.
 
-        ``right`` marks a right-click on the tile — used by the brightness
-        and contrast tiles to decrease instead of increase (左加右减).
+        ``decrease`` marks the 「－」 half of a split tile (or a legacy
+        right-click) — brightness and contrast then step down instead of up.
         """
         usage_key: str | None = None
         if item.action_type == "shortcut":
@@ -2979,10 +2979,10 @@ class MouseGestureApp:
             result = self.actions.open_mouse_pointer_size_settings()
         elif item.action_type == "brightness":
             usage_key = "brightness"
-            result = self.actions.adjust_brightness(-1 if right else 1)
+            result = self.actions.adjust_brightness(-1 if decrease else 1)
         elif item.action_type == "contrast":
             usage_key = "contrast"
-            result = self.actions.adjust_contrast(-1 if right else 1)
+            result = self.actions.adjust_contrast(-1 if decrease else 1)
         elif item.action_type == "ai_tool":
             usage_key = "ai_tool"
             target = self.settings.ai_tool_target
