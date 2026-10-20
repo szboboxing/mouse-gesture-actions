@@ -133,7 +133,7 @@ def _keep_datas(entry):
 
 _pruned = [entry for entry in a.datas if not _keep_datas(entry)]
 a.datas[:] = [entry for entry in a.datas if _keep_datas(entry)]
-print(f"[spec] 剔除 Tcl/Tk 可选包 {len(_pruned)} 个文件")
+print(f"[spec] pruned {len(_pruned)} optional Tcl/Tk files")
 
 pyz = PYZ(a.pure)
 

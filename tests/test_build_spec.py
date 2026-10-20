@@ -107,6 +107,25 @@ class BuildSpecTests(unittest.TestCase):
         self.assertIn('("assets/wallpapers", "assets/wallpapers")', self.spec_text)
         self.assertIn('("assets/icons", "assets/icons")', self.spec_text)
 
+    def test_spec_prints_are_ascii_only(self) -> None:
+        # Runner 的 PowerShell 可能按 cp1252 输出，spec 里的中文日志会抛
+        # UnicodeEncodeError 并让 PyInstaller 中途退出（V2.7.2 首次 CI 就是这样失败的）。
+        for node in ast.walk(ast.parse(self.spec_text)):
+            if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "print":
+                for arg in node.args:
+                    if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                        self.assertTrue(
+                            arg.value.isascii(),
+                            f"spec 第 {node.lineno} 行 print 含非 ASCII 文本",
+                        )
+                    if isinstance(arg, ast.JoinedStr):
+                        for value in arg.values:
+                            if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                                self.assertTrue(
+                                    value.value.isascii(),
+                                    f"spec 第 {node.lineno} 行 f-string 含非 ASCII 文本",
+                                )
+
 
 class OfflineSafetyTests(unittest.TestCase):
     def _top_level_imports(self, filename: str) -> set[str]:

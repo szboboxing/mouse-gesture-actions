@@ -5,6 +5,10 @@ param(
 $ErrorActionPreference = "Stop"
 Push-Location $PSScriptRoot
 
+# Runner 的 PowerShell 默认按系统 ANSI 代码页（英文镜像为 cp1252）输出，
+# 而构建脚本会打印中文产物名，统一强制 UTF-8 以免 UnicodeEncodeError 中断构建。
+$env:PYTHONIOENCODING = "utf-8"
+
 try {
     $VersionTag = (python -c "from version import VERSION_TAG; print(VERSION_TAG)").Trim()
     Write-Host "Mouse Gesture Actions $VersionTag - One-file build" -ForegroundColor Cyan
