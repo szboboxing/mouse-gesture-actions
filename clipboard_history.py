@@ -238,6 +238,7 @@ class ClipboardHistoryPanel(tk.Frame):
         on_status: Callable[[str], None] | None = None,
         on_toggle: Callable[[bool], None] | None = None,
         mode: str = "light",
+        style: str | None = None,
         panel_bg: str | None = None,
     ) -> None:
         self.store = store
@@ -248,17 +249,23 @@ class ClipboardHistoryPanel(tk.Frame):
         self._last_seq: int | None = None
         self._after_id: str | None = None
         self._row_buttons: list[tk.Button] = []
-        self._theme(mode, panel_bg)
+        self._theme(mode, style, panel_bg)
 
         super().__init__(parent, bg=self._pal["panel_bg"])
         self._build()
 
     # ---- theme ----------------------------------------------------------
-    def _theme(self, mode: str, panel_bg: str | None) -> None:
-        """Pick the light/dark palette and blend with the wallpaper's own edge."""
+    def _theme(
+        self,
+        mode: str,
+        style: str | None = None,
+        panel_bg: str | None = None,
+    ) -> None:
+        """Pick the style × 明暗 palette and blend with the wallpaper's edge."""
         self.mode = themes.normalize_mode(mode)
-        pal = themes.palette(self.mode)
-        accents = themes.accent_colors(self.mode)
+        self.style = themes.normalize_style(style)
+        pal = themes.palette(self.mode, self.style)
+        accents = themes.accent_colors(self.mode, self.style)
         edge = panel_bg or pal["base"]
         # Rows / pills keep their own solid colour, but the panel background is
         # the wallpaper's bottom edge so the strip continues the glass picture.
@@ -270,9 +277,14 @@ class ClipboardHistoryPanel(tk.Frame):
         self._pal = pal
         self._accent = accents
 
-    def set_theme(self, mode: str, panel_bg: str | None = None) -> None:
-        """Re-paint the strip for the wheel's current 明暗 mode."""
-        self._theme(mode, panel_bg)
+    def set_theme(
+        self,
+        mode: str,
+        style: str | None = None,
+        panel_bg: str | None = None,
+    ) -> None:
+        """Re-paint the strip for the wheel's current 风格 × 明暗 combination."""
+        self._theme(mode, style, panel_bg)
         self.configure(bg=self._pal["panel_bg"])
         for child in self.winfo_children():
             child.destroy()
@@ -294,7 +306,7 @@ class ClipboardHistoryPanel(tk.Frame):
             text="剪贴板历史",
             bg=bg,
             fg=pal["status_text"],
-            font=("Microsoft YaHei UI", 11, "bold"),
+            font=themes.wheel_font(11),
         ).pack(side="left")
 
         # 最右侧为「清空」，其左侧为「More」（V2.6.2 与旧版互换位置）
@@ -316,7 +328,7 @@ class ClipboardHistoryPanel(tk.Frame):
             text="",
             bg=bg,
             fg=pal["status_muted"],
-            font=("Microsoft YaHei UI", 9),
+            font=themes.wheel_font(9, "normal"),
         )
         self._hint.pack(side="right", padx=(0, 12))
 
@@ -342,7 +354,7 @@ class ClipboardHistoryPanel(tk.Frame):
             highlightthickness=1,
             highlightbackground=pal["pill_rim"],
             highlightcolor=pal["pill_rim"],
-            font=("Microsoft YaHei UI", 10, "bold"),
+            font=themes.wheel_font(10),
             padx=12,
             pady=4,
         )
@@ -405,7 +417,7 @@ class ClipboardHistoryPanel(tk.Frame):
                 else "（记录已暂停）",
                 bg=self._pal["panel_bg"],
                 fg=self._pal["status_muted"],
-                font=("Microsoft YaHei UI", 10),
+                font=themes.wheel_font(10, "normal"),
                 anchor="w",
             )
             placeholder.pack(fill="x", pady=6)
@@ -437,7 +449,7 @@ class ClipboardHistoryPanel(tk.Frame):
             highlightthickness=1,
             highlightbackground=pal["pill_rim"],
             highlightcolor=pal["pill_rim"],
-            font=("Microsoft YaHei UI", 10),
+            font=themes.wheel_font(10, "normal"),
             padx=10,
             pady=5,
         )

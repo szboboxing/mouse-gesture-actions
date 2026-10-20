@@ -9,17 +9,23 @@ from __future__ import annotations
 import tkinter as tk
 from typing import Callable
 
+import themes
 from version import APP_NAME, VERSION_TAG
 
-# 与 app.py 保持一致的配色
-PAGE_BG = "#F4F6FA"
-CARD_BG = "#FFFFFF"
-TEXT = "#172033"
-MUTED = "#657087"
-LINE = "#E4E8F0"
-BLUE = "#4F6EF7"
-BLUE_ACTIVE = "#405ED9"
-BLUE_SOFT = "#EEF1FF"
+# 帮助窗口与控制面板读同一张奶油令牌表（themes.panel_palette）：
+# 以前这里抄了一份独立的冷蓝灰配色，改主题时两边会走样。
+_PANEL = themes.panel_palette()
+PAGE_BG = _PANEL["page"]
+CARD_BG = _PANEL["card"]
+TEXT = _PANEL["text"]
+MUTED = _PANEL["muted"]
+LINE = _PANEL["line"]
+BLUE = _PANEL["accent"]
+BLUE_ACTIVE = _PANEL["accent_active"]
+BLUE_SOFT = _PANEL["accent_soft"]
+DISABLED_BG = _PANEL["disabled"]
+DISABLED_FG = _PANEL["disabled_text"]
+ON_ACCENT = _PANEL["on_accent"]
 
 
 # 各功能模块帮助主题，内容均取自程序实际功能
@@ -146,27 +152,45 @@ HELP_TOPICS: dict[str, dict] = {
             ]},
             {"label": "轮盘外观：风格与明暗", "sections": [
                 ("两个按钮",
-                 "轮盘顶部右侧新增“◈ 风格 · 冰霜”和“☀ 明亮 / ☾ 暗夜”两个按钮，"
+                 "轮盘顶部右侧有“◍ 风格 · 奶油”和“☀ 明亮 / ☾ 暗夜”两个按钮，"
                  "位置在“增强 / 普通模式”徽标的左侧。两者互相独立："
-                 "风格决定背景图，明暗决定整套配色。"),
-                ("三种玻璃风格",
-                 "点“风格”按钮按 冰霜 → 烟晶 → 彩璃 循环切换："
-                 "冰霜＝冷白淡蓝的浅色毛玻璃，最接近旧版观感；"
-                 "烟晶＝银白到石墨的烟晶玻璃，质感最强；"
-                 "彩璃＝蓝绿粉紫的马卡龙彩玻璃，柔和有生气。"
+                 "风格决定整套外观，明暗决定该风格的亮、暗两个版本。"),
+                ("三种风格",
+                 "点“风格”按钮按 奶油 → 冷淡 → 苹果 循环切换："
+                 "奶油＝暖白卡纸配焦糖描边，圆角大、有投影，观感最柔和；"
+                 "冷淡＝白卡加发丝级细边框，方角、无投影、标签为纯文字，"
+                 "只保留钢蓝一种强调色，最克制；"
+                 "苹果＝多彩玻璃底纹配半透圆角磁贴，图标沿用 iOS 系统色。"
                  "按钮上的文字就是当前风格，选择会立即保存。"),
+                ("风格会同时改变形状",
+                 "切换风格不只换背景图：磁贴圆角、描边粗细、投影深浅、"
+                 "标签是否带胶囊底、悬停是否带外圈都会一起按该风格重绘，"
+                 "所以三种风格即使底色接近也能一眼分辨。"),
                 ("明亮 / 暗夜模式",
-                 "点“明暗”按钮在明亮与暗夜之间切换：磁贴、标签胶囊、中心 ⚙、"
+                 "点“明暗”按钮在明亮与暗夜之间切换：磁贴、标签、中心 ⚙、"
                  "顶部状态栏和下方剪贴板历史会一起换成对应配色，"
-                 "暗夜模式下图标描边会自动提亮，保证在深色玻璃上依然清晰。"),
+                 "暗夜模式下图标描边会自动提亮，保证在深色底上依然清晰。"),
+                ("立体图标",
+                 "奶油与苹果两种风格使用预渲染的立体图标：每个图标带高光、"
+                 "底部反光、暗边和投影，颜色跟随所在磁贴的强调色，"
+                 "中心 ⚙ 与亮度／对比度小磁贴同样是立体图。"
+                 "冷淡风格刻意保持扁平文字图标，因为“发丝线＋无投影”"
+                 "本身就是这套风格的特征。"),
+                ("鼠标悬停有动画",
+                 "指针移到磁贴上时，该磁贴会放大并向上浮起，投影同时加深，"
+                 "移开后回弹落回原位。动画用的是带一点过冲的阻尼弹簧，"
+                 "所以松手时会轻轻弹一下再停住，而不是生硬地瞬间切换。"
+                 "判定区域始终按静止位置计算，磁贴放大不会“追着”指针跑。"),
                 ("每种组合都有独立背景",
                  "3 种风格 × 2 种明暗共 6 张背景图，全部随程序打包在本地，"
                  "切换即时生效、不需要等待；背景缺失时自动回退为纯色底纹。"),
-                ("外观只影响轮盘",
-                 "风格与明暗只作用于轮盘主界面（含剪贴板历史条），"
-                 "“更多设置”控制面板保持浅色布局不变。"),
+                ("外观与控制面板",
+                 "风格与明暗只作用于轮盘主界面（含剪贴板历史条）；"
+                 "“更多设置”控制面板固定使用奶油风浅色，和默认风格的轮盘读同一套"
+                 "暖色令牌，不会再出现轮盘是暖色、设置页是冷蓝灰的割裂。"),
                 ("纯本地素材",
-                 "背景图是随 EXE 一起打包的本地 PNG，不联网下载、不外发任何数据。"),
+                 "背景图与立体图标都是随 EXE 一起打包的本地 PNG，"
+                 "不联网下载、不外发任何数据。"),
             ]},
             {"label": "剪贴板历史", "sections": [
                 ("记录与再复制",
@@ -408,9 +432,9 @@ class HelpBrowser(tk.Toplevel):
     def _set_enabled(button: tk.Button, enabled: bool) -> None:
         button.configure(
             state="normal" if enabled else "disabled",
-            bg=BLUE if enabled else "#C7CEE8",
-            activebackground=BLUE_ACTIVE if enabled else "#C7CEE8",
-            disabledforeground="#F2F4FB",
+            bg=BLUE if enabled else DISABLED_BG,
+            activebackground=BLUE_ACTIVE if enabled else DISABLED_BG,
+            disabledforeground=DISABLED_FG,
         )
 
     def _nav_button(
@@ -420,15 +444,19 @@ class HelpBrowser(tk.Toplevel):
         command: Callable[[], None],
         accent: bool = False,
     ) -> tk.Button:
+        # accent=True 给「关闭」这类确认按钮：用更深的奶油强调色，和
+        # 首页/上一页一排的亮色导航按钮区分开（以前这个参数没有生效）。
+        body = BLUE_ACTIVE if accent else BLUE
+        hover = BLUE if accent else BLUE_ACTIVE
         return tk.Button(
             parent,
             text=text,
             command=command,
-            bg=BLUE,
-            fg="#FFFFFF",
-            activebackground=BLUE_ACTIVE,
-            activeforeground="#FFFFFF",
-            disabledforeground="#F2F4FB",
+            bg=body,
+            fg=ON_ACCENT,
+            activebackground=hover,
+            activeforeground=ON_ACCENT,
+            disabledforeground=DISABLED_FG,
             relief="flat",
             bd=0,
             cursor="hand2",
@@ -447,7 +475,7 @@ class HelpBrowser(tk.Toplevel):
             bg=BLUE_SOFT,
             fg=TEXT,
             activebackground=BLUE,
-            activeforeground="#FFFFFF",
+            activeforeground=ON_ACCENT,
             relief="flat",
             bd=0,
             cursor="hand2",

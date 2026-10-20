@@ -22,8 +22,11 @@ a = Analysis(
     binaries=[],
     datas=[
         ("assets/mouse_gesture.ico", "assets"),
-        # 轮盘玻璃壁纸（3 风格 × 明暗 2 模式，共 6 张 PNG，约 0.5MB）
+        # 轮盘风格壁纸（奶油 / 冷淡 / 苹果 × 明暗 2 模式，共 6 张 PNG，约 0.19MB）
         ("assets/wallpapers", "assets/wallpapers"),
+        # 立体图标表（奶油 / 苹果 × 明暗 × 9 图标 × 4 尺寸，共 144 张，约 0.22MB）
+        # Pillow 不参与打包，所以这些图必须离线预渲染好随包带上。
+        ("assets/icons", "assets/icons"),
     ],
     hiddenimports=[
         "pythoncom",
@@ -68,10 +71,70 @@ a = Analysis(
         "optparse",
         "tkinter.dnd",
         "tkinter.tix",
+        # ---- V2.7.2 体积裁剪：逐项确认过引用来源，均可安全排除 ----
+        # random 只在库内的 _test_generator()（CPython 自测函数，永远不会被调用）
+        # 里 import statistics，statistics 再牵连 decimal / fractions / _pydecimal
+        # 以及 _decimal.pyd，合计约 0.2MB。排除后 random.random()/choice() 照常可用。
+        "statistics",
+        "decimal",
+        "_decimal",
+        "fractions",
+        "_pydecimal",
+        # 浏览器磁贴改为直接 os.startfile()（等价于 webbrowser 在 Windows 上的
+        # 最终调用），webbrowser 及其 subprocess / signal / selectors / shlex
+        # 依赖链整条下线；同时排除以防被其它模块悄悄带回。
+        "webbrowser",
+        "subprocess",
+        "signal",
+        "selectors",
+        "shlex",
+        # shutil / zipfile 对下面这几个都是 try/except ImportError 的可选压缩后端，
+        # 本程序不解压任何归档，排除后 _lzma.pyd 与 _bz2.pyd 不再进包。
+        "lzma",
+        "_lzma",
+        "bz2",
+        "_bz2",
+        "tarfile",
+        "gzip",
+        "_compression",
+        # 只有 importlib.metadata 会用到 email 与 csv，而 importlib.metadata 在本
+        # 程序里没有任何调用点（唯一引用它的是 makepy，同样未被使用）。
+        # 少一个 SMTP/HTTP 报文解析库，也更符合内网无外联的安全要求。
+        "importlib.metadata",
+        "email",
+        "csv",
     ],
     noarchive=False,
     optimize=2,
 )
+
+# ---- Tcl / Tk 运行时里用不到的可选包 ----
+# PyInstaller 收集 Tcl/Tk 时没有可配置项（hooksconfig 不支持），只能在 Analysis
+# 结束后按目标路径过滤。下面几项都核对过 Tcl 的 package require 关系：
+#   tzdata     —— Tcl 的 clock 在 Windows 上读注册表时区，不查 zoneinfo 文件
+#   http       —— 内网工具不做任何 HTTP 请求（去掉后也没有外联能力）
+#   tcltest    —— 只有 Tk 自带的控制台/自检脚本会 require，运行时用不到
+#   platform   —— 无人 require，仅被 Tcl 测试框架使用
+# 必须保留：msgcat（clock.tcl 与 tk.tcl 都 require）、opt0.4（被 require）、
+# encoding/（中文 Windows 的 cp936 等系统编码）、msgs/（本地化按钮文案）。
+_PRUNED_TCL_PREFIXES = (
+    "_tcl_data/tzdata/",
+    "_tcl_data/http1.0/",
+    "tcl8/8.6/http",
+    "tcl8/8.5/tcltest",
+    "tcl8/8.4/platform",
+)
+
+
+def _keep_datas(entry):
+    name = str(entry[0]).replace("\\", "/")
+    return not any(name.startswith(prefix) for prefix in _PRUNED_TCL_PREFIXES)
+
+
+_pruned = [entry for entry in a.datas if not _keep_datas(entry)]
+a.datas[:] = [entry for entry in a.datas if _keep_datas(entry)]
+print(f"[spec] 剔除 Tcl/Tk 可选包 {len(_pruned)} 个文件")
+
 pyz = PYZ(a.pure)
 
 exe = EXE(

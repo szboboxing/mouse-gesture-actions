@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import ctypes
 import os
-import sys
 import time
-import webbrowser
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -176,23 +174,16 @@ class SystemActions:
         return self._open_target("calc.exe", "计算器")
 
     def open_browser(self) -> ActionResult:
-        # 内网使用：只负责唤起系统默认浏览器，不强制访问任何外部站点，
+        # 内网使用：只负责唤起系统默认浏览器，不访问任何外部站点，
         # 用中性空白页启动，避免出现无网络时的外联请求或加载失败。
+        # 这里不再走 webbrowser 模块：它在 Windows 上最终也是调用
+        # os.startfile（GenericBrowser 分支则会牵连 subprocess 子进程栈），
+        # 直接用 ShellExecute 既等价，又能把 subprocess 从单文件包里去掉。
         try:
-            try:
-                opener = webbrowser.get()
-                launched = bool(opener.open("about:blank", new=2))
-            except webbrowser.Error:
-                launched = False
-            if not launched:
-                # 某些浏览器句柄拒绝 about:blank 时，退回系统 start 命令。
-                os.startfile("about:blank")
-                launched = True
-            if not launched:
-                return ActionResult(False, "浏览器启动失败", "未找到默认浏览器")
-            return ActionResult(True, "已启动浏览器", "使用系统默认浏览器")
-        except (OSError, webbrowser.Error) as exc:
+            os.startfile("about:blank")
+        except OSError as exc:
             return ActionResult(False, "浏览器启动失败", str(exc))
+        return ActionResult(True, "已启动浏览器", "使用系统默认浏览器")
 
     def open_media_player(self) -> ActionResult:
         errors: list[str] = []

@@ -220,18 +220,18 @@ class SettingsTests(unittest.TestCase):
         self.assertTrue(settings.keyboard_mappings[0].enabled)
         self.assertFalse(settings.keyboard_mappings[1].enabled)
 
-    def test_wheel_appearance_defaults_to_light_frost(self) -> None:
+    def test_wheel_appearance_defaults_to_light_cream(self) -> None:
         settings = AppSettings.from_mapping({})
 
-        self.assertEqual(settings.wheel_style, "frost")
+        self.assertEqual(settings.wheel_style, "cream")
         self.assertEqual(settings.wheel_mode, "light")
 
     def test_wheel_appearance_choices_are_persisted(self) -> None:
         settings = AppSettings.from_mapping(
-            {"wheel_style": "pastel", "wheel_mode": "dark"}
+            {"wheel_style": "apple", "wheel_mode": "dark"}
         )
 
-        self.assertEqual(settings.wheel_style, "pastel")
+        self.assertEqual(settings.wheel_style, "apple")
         self.assertEqual(settings.wheel_mode, "dark")
 
     def test_unknown_wheel_appearance_values_fall_back_to_defaults(self) -> None:
@@ -239,8 +239,16 @@ class SettingsTests(unittest.TestCase):
             {"wheel_style": "neon", "wheel_mode": True}
         )
 
-        self.assertEqual(settings.wheel_style, "frost")
+        self.assertEqual(settings.wheel_style, "cream")
         self.assertEqual(settings.wheel_mode, "light")
+
+    def test_retired_v27_style_names_fall_back_to_cream(self) -> None:
+        # V2.7.0 stored 冰霜 / 烟晶 / 彩璃; an upgraded settings.json must land
+        # on the new default instead of asking for a missing wallpaper.
+        for retired in ("frost", "graphite", "pastel"):
+            with self.subTest(wheel_style=retired):
+                settings = AppSettings.from_mapping({"wheel_style": retired})
+                self.assertEqual(settings.wheel_style, "cream")
 
 
 if __name__ == "__main__":

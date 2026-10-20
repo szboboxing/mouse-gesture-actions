@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ctypes
+import dataclasses
 import os
 import queue
 import random
@@ -38,9 +39,7 @@ from settings import (
     KEYBOARD_MAPPING_ACTION_ENHANCED_PASTE,
     KEYBOARD_MAPPING_ACTION_SHORTCUT,
     KEYBOARD_MAPPING_KEYS,
-    AppSettings,
     KeyboardMappingSettings,
-    RadialMenuItemSettings,
     load_settings,
 )
 from version import APP_NAME, VERSION_TAG
@@ -60,25 +59,9 @@ def _force_exit_current_process(exit_code: int) -> None:
     os._exit(exit_code)
 
 
-COLORS = {
-    "nav": "#111827",
-    "nav_soft": "#1F2937",
-    "nav_text": "#F9FAFB",
-    "nav_muted": "#9CA3AF",
-    "page": "#F4F6FA",
-    "card": "#FFFFFF",
-    "text": "#172033",
-    "muted": "#657087",
-    "line": "#E4E8F0",
-    "blue": "#4F6EF7",
-    "blue_soft": "#EEF1FF",
-    "green": "#1FA774",
-    "green_soft": "#E8F8F1",
-    "orange": "#E58A28",
-    "orange_soft": "#FFF4E5",
-    "red": "#DF4B5F",
-    "red_soft": "#FDECEF",
-}
+# 控制面板的配色统一取自 themes 的奶油风令牌：轮盘磁贴与控制面板卡片读同一张表，
+# 改一处即可，不会再出现「轮盘是暖色、设置页是冷蓝灰」的割裂。
+COLORS = themes.panel_palette()
 
 CUSTOM_TOOL_ICON = "◇"
 MOUSE_POINTER_SIZE_ICON = "🖱"
@@ -209,7 +192,7 @@ class GestureCard(tk.Frame):
             self,
             width=54,
             height=54,
-            bg=COLORS["blue_soft"],
+            bg=COLORS["accent_soft"],
             highlightthickness=0,
         )
         icon.grid(row=0, column=0, rowspan=2, sticky="nw", padx=(0, 13))
@@ -259,7 +242,7 @@ class GestureCard(tk.Frame):
 
     @staticmethod
     def _draw_icon(canvas: tk.Canvas, gesture: str, accent: str) -> None:
-        canvas.create_rectangle(0, 0, 54, 54, fill=COLORS["blue_soft"], outline="")
+        canvas.create_rectangle(0, 0, 54, 54, fill=COLORS["accent_soft"], outline="")
         if gesture in {"wheel_up", "wheel_down"}:
             canvas.create_oval(
                 13, 7, 41, 48, outline=accent, width=3
@@ -462,7 +445,9 @@ class MouseGestureApp:
         x = max(0, (self.root.winfo_screenwidth() - width) // 2)
         y = max(0, (self.root.winfo_screenheight() - height) // 2)
         self.root.geometry(f"{width}x{height}+{x}+{y}")
-        self.root.minsize(min(width, 600), min(height, 600))
+        # 顶栏在最长状态文案（已开启 · 正在监听 + 增强模式徽标）下实测需要 610px，
+        # 所以下限取 620 而不是 600：窗口无论怎么拖，状态文字与四枚按钮都完整可见。
+        self.root.minsize(min(width, 620), min(height, 600))
         # The glass wallpaper is a fixed 640x400 picture centred on the wheel
         # canvas, so the compact window must not grow past it — otherwise flat
         # background bands would appear around the picture.
@@ -485,23 +470,44 @@ class MouseGestureApp:
         self.root.geometry(f"{width}x{height}+{x}+{y}")
 
     def _configure_styles(self) -> None:
+        # ttk 控件（组合框 / 复选框）也全部读奶油令牌，避免 clam 主题自带的
+        # 冷灰底把暖色卡片里的一小块拉回蓝灰色。
         style = ttk.Style(self.root)
         style.theme_use("clam")
         style.configure(
             "App.TCombobox",
-            fieldbackground=COLORS["card"],
-            background=COLORS["card"],
+            fieldbackground=COLORS["field"],
+            background=COLORS["field"],
             foreground=COLORS["text"],
-            bordercolor=COLORS["line"],
-            lightcolor=COLORS["line"],
-            darkcolor=COLORS["line"],
+            bordercolor=COLORS["field_line"],
+            lightcolor=COLORS["field_line"],
+            darkcolor=COLORS["field_line"],
+            arrowcolor=COLORS["muted"],
+            arrowsize=14,
             padding=6,
         )
         style.map(
             "App.TCombobox",
-            fieldbackground=[("readonly", COLORS["card"])],
-            selectbackground=[("readonly", COLORS["card"])],
-            selectforeground=[("readonly", COLORS["text"])],
+            fieldbackground=[("readonly", COLORS["field"])],
+            selectbackground=[
+                ("readonly", COLORS["field"]),
+                ("focus", COLORS["selection"]),
+            ],
+            selectforeground=[
+                ("readonly", COLORS["text"]),
+                ("focus", COLORS["selection_text"]),
+            ],
+            bordercolor=[("focus", COLORS["accent"])],
+            arrowcolor=[("disabled", COLORS["disabled_text"])],
+        )
+        style.configure(
+            "TCombobox",
+            fieldbackground=COLORS["field"],
+            background=COLORS["field"],
+            bordercolor=COLORS["field_line"],
+            lightcolor=COLORS["field_line"],
+            darkcolor=COLORS["field_line"],
+            arrowcolor=COLORS["muted"],
         )
         style.configure(
             "App.TCheckbutton",
@@ -512,10 +518,13 @@ class MouseGestureApp:
         style.map(
             "App.TCheckbutton",
             background=[("active", COLORS["card"])],
+            foreground=[("disabled", COLORS["disabled_text"])],
             indicatorcolor=[
-                ("selected", COLORS["blue"]),
-                ("!selected", COLORS["card"]),
+                ("selected", COLORS["accent"]),
+                ("active", COLORS["accent_hover"]),
+                ("!selected", COLORS["field"]),
             ],
+            bordercolor=[("focus", COLORS["accent"])],
         )
         style.configure(
             "Mapping.TCheckbutton",
@@ -526,10 +535,13 @@ class MouseGestureApp:
         style.map(
             "Mapping.TCheckbutton",
             background=[("active", COLORS["page"])],
+            foreground=[("disabled", COLORS["disabled_text"])],
             indicatorcolor=[
-                ("selected", COLORS["blue"]),
-                ("!selected", COLORS["page"]),
+                ("selected", COLORS["accent"]),
+                ("active", COLORS["accent_hover"]),
+                ("!selected", COLORS["field"]),
             ],
+            bordercolor=[("focus", COLORS["accent"])],
         )
 
     def _build_layout(self) -> None:
@@ -542,7 +554,8 @@ class MouseGestureApp:
         self._radial_view = tk.Frame(
             self._view_container,
             bg=themes.palette(
-                themes.normalize_mode(self.settings.wheel_mode)
+                themes.normalize_mode(self.settings.wheel_mode),
+                themes.normalize_style(self.settings.wheel_style),
             )["base"],
         )
 
@@ -565,6 +578,7 @@ class MouseGestureApp:
             on_status=self._on_clipboard_status,
             on_toggle=self._on_clipboard_toggle,
             mode=mode,
+            style=style,
             panel_bg=edges["bottom"],
         )
         self.clipboard_panel.pack(side="bottom", fill="x")
@@ -593,15 +607,20 @@ class MouseGestureApp:
             self.settings.save()
         except OSError:
             pass
+        saved_style = self.settings.wheel_style
         saved_mode = self.settings.wheel_mode
-        edges = themes.wallpaper_edges(self.settings.wheel_style, saved_mode)
+        edges = themes.wallpaper_edges(saved_style, saved_mode)
         if self.clipboard_panel is not None:
-            self.clipboard_panel.set_theme(saved_mode, edges["bottom"])
-        self._radial_view.configure(bg=themes.palette(saved_mode)["base"])
+            self.clipboard_panel.set_theme(
+                saved_mode, saved_style, edges["bottom"]
+            )
+        self._radial_view.configure(
+            bg=themes.palette(saved_mode, saved_style)["base"]
+        )
         self._show_toast(
-            f"轮盘外观：{themes.style_label(self.settings.wheel_style)} · "
+            f"轮盘外观：{themes.style_label(saved_style)} · "
             f"{themes.mode_label(saved_mode)}",
-            themes.accent_colors(saved_mode)["hover"],
+            themes.accent_colors(saved_mode, saved_style)["hover"],
         )
 
     def _on_clipboard_toggle(self, enabled: bool) -> None:
@@ -652,15 +671,15 @@ class MouseGestureApp:
             brand,
             width=46,
             height=46,
-            bg=COLORS["blue"],
+            bg=COLORS["accent"],
             highlightthickness=0,
         )
         logo.pack(side="left")
         logo.create_arc(
             9, 9, 37, 37, start=25, extent=290, style="arc",
-            outline="#FFFFFF", width=4
+            outline=COLORS["on_accent"], width=4
         )
-        logo.create_polygon(8, 18, 17, 17, 13, 26, fill="#FFFFFF")
+        logo.create_polygon(8, 18, 17, 17, 13, 26, fill=COLORS["on_accent"])
         name_box = tk.Frame(brand, bg=COLORS["nav"])
         name_box.pack(side="left", padx=(12, 0))
         tk.Label(
@@ -696,7 +715,7 @@ class MouseGestureApp:
         )
         self.status_dot.grid(row=0, column=0, padx=(0, 8))
         self.status_dot_id = self.status_dot.create_oval(
-            2, 2, 10, 10, fill=COLORS["orange"], outline=""
+            2, 2, 10, 10, fill=COLORS["warning"], outline=""
         )
         tk.Label(
             status_box,
@@ -717,10 +736,10 @@ class MouseGestureApp:
             sidebar,
             text="暂停组合监听",
             command=self.toggle_listening,
-            bg=COLORS["blue"],
-            fg="#FFFFFF",
-            activebackground="#405ED9",
-            activeforeground="#FFFFFF",
+            bg=COLORS["accent"],
+            fg=COLORS["on_accent"],
+            activebackground=COLORS["accent_active"],
+            activeforeground=COLORS["on_accent"],
             relief="flat",
             bd=0,
             cursor="hand2",
@@ -734,10 +753,10 @@ class MouseGestureApp:
             sidebar,
             text="⟲  返回轮盘",
             command=self._show_radial_view,
-            bg=COLORS["blue"],
-            fg="#FFFFFF",
+            bg=COLORS["accent"],
+            fg=COLORS["on_accent"],
             activebackground=COLORS["nav"],
-            activeforeground="#FFFFFF",
+            activeforeground=COLORS["on_accent"],
             relief="flat",
             bd=0,
             cursor="hand2",
@@ -797,8 +816,8 @@ class MouseGestureApp:
             github_box,
             text=GITHUB_PROJECT_URL,
             bg=COLORS["nav"],
-            fg="#93C5FD",
-            activeforeground="#C7D2FE",
+            fg=COLORS["nav_link"],
+            activeforeground=COLORS["nav_link_hover"],
             cursor="hand2",
             font=("Segoe UI", 8, "underline"),
             justify="left",
@@ -811,11 +830,11 @@ class MouseGestureApp:
         )
         self.github_link_label.bind(
             "<Enter>",
-            lambda _event: self.github_link_label.configure(fg="#C7D2FE"),
+            lambda _event: self.github_link_label.configure(fg=COLORS["nav_link_hover"]),
         )
         self.github_link_label.bind(
             "<Leave>",
-            lambda _event: self.github_link_label.configure(fg="#93C5FD"),
+            lambda _event: self.github_link_label.configure(fg=COLORS["nav_link"]),
         )
 
         help_box = tk.Frame(sidebar, bg=COLORS["nav"])
@@ -871,7 +890,7 @@ class MouseGestureApp:
             bg=COLORS["nav"],
             fg=COLORS["nav_text"],
             activebackground=COLORS["nav_soft"],
-            activeforeground="#FFFFFF",
+            activeforeground=COLORS["on_accent"],
             relief="flat",
             bd=0,
             cursor="hand2",
@@ -916,9 +935,9 @@ class MouseGestureApp:
         for name, button in self.nav_buttons.items():
             selected = name == page_name
             button.configure(
-                bg=COLORS["blue"] if selected else COLORS["nav"],
+                bg=COLORS["accent"] if selected else COLORS["nav"],
                 activebackground=(
-                    "#405ED9" if selected else COLORS["nav_soft"]
+                    COLORS["accent_active"] if selected else COLORS["nav_soft"]
                 ),
             )
         self._refresh_listening_state()
@@ -945,8 +964,8 @@ class MouseGestureApp:
         tk.Label(
             header,
             text="方案 A · 右键保持",
-            bg=COLORS["green_soft"],
-            fg=COLORS["green"],
+            bg=COLORS["success_soft"],
+            fg=COLORS["success"],
             padx=13,
             pady=7,
             font=("Microsoft YaHei UI", 9, "bold"),
@@ -972,21 +991,21 @@ class MouseGestureApp:
                 "复制",
                 "右键按住 + 滚轮向上",
                 "复制选中的文本或文件（Ctrl+C）",
-                COLORS["blue"],
+                COLORS["accent"],
             ),
             (
                 "wheel_down",
                 "增强粘贴",
                 "右键按住 + 滚轮向下",
                 "新建文件夹，进入重命名并粘贴剪贴板内容",
-                COLORS["green"],
+                COLORS["success"],
             ),
             (
                 "xbutton1",
                 "侧键截图",
                 "右键按住 + 已确认侧键",
                 "测试页可重新确认；未启动映射时保留前进/后退",
-                COLORS["orange"],
+                COLORS["warning"],
             ),
         )
         for index, spec in enumerate(card_specs):
@@ -1032,7 +1051,7 @@ class MouseGestureApp:
         ).grid(row=1, column=0, sticky="w", pady=(3, 10))
         self.log_text = tk.Text(
             activity,
-            bg="#F8F9FC",
+            bg=COLORS["card_soft"],
             fg=COLORS["text"],
             relief="flat",
             bd=0,
@@ -1045,11 +1064,13 @@ class MouseGestureApp:
             font=("Microsoft YaHei UI", 8),
             spacing2=2,
             spacing3=7,
+            selectbackground=COLORS["selection"],
+            selectforeground=COLORS["selection_text"],
         )
         self.log_text.grid(row=2, column=0, sticky="nsew")
-        self.log_text.tag_configure("success", foreground=COLORS["green"])
-        self.log_text.tag_configure("warning", foreground=COLORS["orange"])
-        self.log_text.tag_configure("error", foreground=COLORS["red"])
+        self.log_text.tag_configure("success", foreground=COLORS["success"])
+        self.log_text.tag_configure("warning", foreground=COLORS["warning"])
+        self.log_text.tag_configure("error", foreground=COLORS["danger"])
         self.log_text.tag_configure("muted", foreground=COLORS["muted"])
 
         statistics = tk.Frame(
@@ -1149,7 +1170,7 @@ class MouseGestureApp:
                 item,
                 textvariable=self.usage_vars[key],
                 bg=COLORS["card"],
-                fg=COLORS["blue"],
+                fg=COLORS["accent"],
                 font=("Segoe UI", 8, "bold"),
             ).pack(side="right")
 
@@ -1196,10 +1217,10 @@ class MouseGestureApp:
             settings_panel,
             text="保存设置",
             command=self.save_settings,
-            bg=COLORS["blue"],
-            fg="#FFFFFF",
-            activebackground="#405ED9",
-            activeforeground="#FFFFFF",
+            bg=COLORS["accent"],
+            fg=COLORS["on_accent"],
+            activebackground=COLORS["accent_active"],
+            activeforeground=COLORS["on_accent"],
             relief="flat",
             bd=0,
             cursor="hand2",
@@ -1233,8 +1254,8 @@ class MouseGestureApp:
         tk.Label(
             header,
             text="实时检测 · 可确认保存侧键",
-            bg=COLORS["green_soft"],
-            fg=COLORS["green"],
+            bg=COLORS["success_soft"],
+            fg=COLORS["success"],
             padx=14,
             pady=8,
             font=("Microsoft YaHei UI", 9, "bold"),
@@ -1274,7 +1295,7 @@ class MouseGestureApp:
             visual_panel,
             width=620,
             height=520,
-            bg="#F8F9FC",
+            bg=COLORS["card_soft"],
             highlightthickness=0,
         )
         self.mouse_test_canvas.pack(fill="both", expand=True)
@@ -1299,7 +1320,7 @@ class MouseGestureApp:
         ).grid(row=0, column=0, sticky="w")
         status_card = tk.Frame(
             details,
-            bg=COLORS["blue_soft"],
+            bg=COLORS["accent_soft"],
             padx=13,
             pady=12,
         )
@@ -1307,15 +1328,15 @@ class MouseGestureApp:
         tk.Label(
             status_card,
             text="最后检测",
-            bg=COLORS["blue_soft"],
+            bg=COLORS["accent_soft"],
             fg=COLORS["muted"],
             font=("Microsoft YaHei UI", 8),
         ).pack(anchor="w")
         tk.Label(
             status_card,
             textvariable=self.mouse_test_status_var,
-            bg=COLORS["blue_soft"],
-            fg=COLORS["blue"],
+            bg=COLORS["accent_soft"],
+            fg=COLORS["accent"],
             font=("Microsoft YaHei UI", 12, "bold"),
             wraplength=270,
             justify="left",
@@ -1352,13 +1373,13 @@ class MouseGestureApp:
                 item,
                 textvariable=self.mouse_test_count_vars[control],
                 bg=COLORS["page"],
-                fg=COLORS["blue"],
+                fg=COLORS["accent"],
                 font=("Segoe UI", 10, "bold"),
             ).pack(side="right")
 
         side_config = tk.Frame(
             details,
-            bg=COLORS["orange_soft"],
+            bg=COLORS["warning_soft"],
             padx=12,
             pady=10,
         )
@@ -1366,14 +1387,14 @@ class MouseGestureApp:
         tk.Label(
             side_config,
             text="侧键截图确认",
-            bg=COLORS["orange_soft"],
-            fg=COLORS["orange"],
+            bg=COLORS["warning_soft"],
+            fg=COLORS["warning"],
             font=("Microsoft YaHei UI", 9, "bold"),
         ).pack(anchor="w")
         tk.Label(
             side_config,
             textvariable=self.side_button_config_var,
-            bg=COLORS["orange_soft"],
+            bg=COLORS["warning_soft"],
             fg=COLORS["text"],
             font=("Microsoft YaHei UI", 8, "bold"),
             justify="left",
@@ -1382,22 +1403,22 @@ class MouseGestureApp:
         tk.Label(
             side_config,
             textvariable=self.side_button_confirm_var,
-            bg=COLORS["orange_soft"],
+            bg=COLORS["warning_soft"],
             fg=COLORS["muted"],
             font=("Microsoft YaHei UI", 8),
             justify="left",
             wraplength=270,
         ).pack(anchor="w", pady=(3, 7))
-        side_buttons = tk.Frame(side_config, bg=COLORS["orange_soft"])
+        side_buttons = tk.Frame(side_config, bg=COLORS["warning_soft"])
         side_buttons.pack(fill="x")
         tk.Button(
             side_buttons,
             text="重新确认侧键",
             command=self._begin_side_button_reconfirmation,
             bg=COLORS["card"],
-            fg=COLORS["orange"],
+            fg=COLORS["warning"],
             activebackground=COLORS["page"],
-            activeforeground=COLORS["orange"],
+            activeforeground=COLORS["warning"],
             relief="flat",
             bd=0,
             cursor="hand2",
@@ -1409,10 +1430,10 @@ class MouseGestureApp:
             side_buttons,
             text="保存检测结果",
             command=self._save_detected_side_buttons,
-            bg=COLORS["green"],
-            fg="#FFFFFF",
-            activebackground="#17875F",
-            activeforeground="#FFFFFF",
+            bg=COLORS["success"],
+            fg=COLORS["on_accent"],
+            activebackground=COLORS["success_active"],
+            activeforeground=COLORS["on_accent"],
             relief="flat",
             bd=0,
             cursor="hand2",
@@ -1425,10 +1446,10 @@ class MouseGestureApp:
             details,
             text="清空测试记录",
             command=self._reset_mouse_test,
-            bg=COLORS["blue"],
-            fg="#FFFFFF",
-            activebackground="#405ED9",
-            activeforeground="#FFFFFF",
+            bg=COLORS["accent"],
+            fg=COLORS["on_accent"],
+            activebackground=COLORS["accent_active"],
+            activeforeground=COLORS["on_accent"],
             relief="flat",
             bd=0,
             cursor="hand2",
@@ -1444,8 +1465,8 @@ class MouseGestureApp:
             24,
             465,
             505,
-            fill="#E9EDF5",
-            outline="#B9C2D1",
+            fill=COLORS["diagram"],
+            outline=COLORS["diagram_line"],
             width=3,
         )
         canvas.create_line(
@@ -1453,7 +1474,7 @@ class MouseGestureApp:
             42,
             310,
             220,
-            fill="#B9C2D1",
+            fill=COLORS["diagram_line"],
             width=2,
         )
 
@@ -1468,8 +1489,8 @@ class MouseGestureApp:
             216,
             173,
             205,
-            fill="#FFFFFF",
-            outline="#CCD3DF",
+            fill=COLORS["card"],
+            outline=COLORS["diagram_line"],
             width=2,
         )
         left_text = canvas.create_text(
@@ -1482,14 +1503,14 @@ class MouseGestureApp:
         self._register_mouse_test_visual(
             MouseControl.LEFT,
             left,
-            "#FFFFFF",
-            COLORS["green"],
+            COLORS["card"],
+            COLORS["success"],
         )
         self._register_mouse_test_visual(
             MouseControl.LEFT,
             left_text,
             COLORS["text"],
-            "#FFFFFF",
+            COLORS["on_accent"],
         )
 
         right = canvas.create_polygon(
@@ -1503,8 +1524,8 @@ class MouseGestureApp:
             205,
             318,
             216,
-            fill="#FFFFFF",
-            outline="#CCD3DF",
+            fill=COLORS["card"],
+            outline=COLORS["diagram_line"],
             width=2,
         )
         right_text = canvas.create_text(
@@ -1517,14 +1538,14 @@ class MouseGestureApp:
         self._register_mouse_test_visual(
             MouseControl.RIGHT,
             right,
-            "#FFFFFF",
-            COLORS["green"],
+            COLORS["card"],
+            COLORS["success"],
         )
         self._register_mouse_test_visual(
             MouseControl.RIGHT,
             right_text,
             COLORS["text"],
-            "#FFFFFF",
+            COLORS["on_accent"],
         )
 
         wheel = canvas.create_rectangle(
@@ -1532,29 +1553,29 @@ class MouseGestureApp:
             72,
             338,
             194,
-            fill="#CBD3E1",
-            outline="#9CA8BA",
+            fill=COLORS["diagram_soft"],
+            outline=COLORS["diagram_strong"],
             width=2,
         )
         self._register_mouse_test_visual(
             MouseControl.MIDDLE,
             wheel,
-            "#CBD3E1",
-            COLORS["green"],
+            COLORS["diagram_soft"],
+            COLORS["success"],
         )
         wheel_label = canvas.create_text(
             310,
             133,
             text="按下",
             angle=90,
-            fill=COLORS["muted"],
+            fill=COLORS["text"],
             font=("Microsoft YaHei UI", 8, "bold"),
         )
         self._register_mouse_test_visual(
             MouseControl.MIDDLE,
             wheel_label,
-            COLORS["muted"],
-            "#FFFFFF",
+            COLORS["text"],
+            COLORS["on_accent"],
         )
 
         for control, y, text in (
@@ -1572,7 +1593,7 @@ class MouseGestureApp:
                 control,
                 arrow,
                 COLORS["muted"],
-                COLORS["orange"],
+                COLORS["warning"],
             )
 
         for control, top in (
@@ -1584,28 +1605,28 @@ class MouseGestureApp:
                 top,
                 183,
                 top + 55,
-                fill=COLORS["blue_soft"],
-                outline=COLORS["blue"],
+                fill=COLORS["accent_soft"],
+                outline=COLORS["accent"],
                 width=2,
             )
             text = canvas.create_text(
                 155,
                 top + 27,
                 text=MOUSE_TEST_DIAGRAM_LABELS[control],
-                fill=COLORS["blue"],
+                fill=COLORS["accent"],
                 font=("Microsoft YaHei UI", 8, "bold"),
             )
             self._register_mouse_test_visual(
                 control,
                 button,
-                COLORS["blue_soft"],
-                COLORS["green"],
+                COLORS["accent_soft"],
+                COLORS["success"],
             )
             self._register_mouse_test_visual(
                 control,
                 text,
-                COLORS["blue"],
-                "#FFFFFF",
+                COLORS["accent"],
+                COLORS["on_accent"],
             )
 
         canvas.create_text(
@@ -1691,10 +1712,10 @@ class MouseGestureApp:
                 command=lambda target=index: (
                     self._toggle_keyboard_mapping(target)
                 ),
-                bg=COLORS["blue"],
-                fg="#FFFFFF",
-                activebackground="#405ED9",
-                activeforeground="#FFFFFF",
+                bg=COLORS["accent"],
+                fg=COLORS["on_accent"],
+                activebackground=COLORS["accent_active"],
+                activeforeground=COLORS["on_accent"],
                 relief="flat",
                 bd=0,
                 cursor="hand2",
@@ -1827,9 +1848,9 @@ class MouseGestureApp:
             lambda: self._run_quick_action(
                 "calculator", self.actions.open_calculator
             ),
-            COLORS["blue"],
+            COLORS["accent"],
             icon="▦",
-            hover_color=COLORS["blue_soft"],
+            hover_color=COLORS["accent_soft"],
         )
         self._quick_button(
             buttons,
@@ -1838,9 +1859,9 @@ class MouseGestureApp:
             lambda: self._run_quick_action(
                 "browser", self.actions.open_browser
             ),
-            COLORS["green"],
+            COLORS["success"],
             icon="◎",
-            hover_color=COLORS["green_soft"],
+            hover_color=COLORS["success_soft"],
         )
         self._quick_button(
             buttons,
@@ -1849,9 +1870,9 @@ class MouseGestureApp:
             lambda: self._run_quick_action(
                 "media", self.actions.open_media_player
             ),
-            COLORS["orange"],
+            COLORS["warning"],
             icon="▶",
-            hover_color=COLORS["orange_soft"],
+            hover_color=COLORS["warning_soft"],
         )
         self._adjustment_group(
             buttons,
@@ -1860,8 +1881,8 @@ class MouseGestureApp:
             lambda: self._run_display_adjustment("brightness", -1),
             lambda: self._run_display_adjustment("brightness", 1),
             "☀",
-            COLORS["orange"],
-            COLORS["orange_soft"],
+            COLORS["warning"],
+            COLORS["warning_soft"],
         )
         self._adjustment_group(
             buttons,
@@ -1870,17 +1891,17 @@ class MouseGestureApp:
             lambda: self._run_display_adjustment("contrast", -1),
             lambda: self._run_display_adjustment("contrast", 1),
             "◐",
-            COLORS["blue"],
-            COLORS["blue_soft"],
+            COLORS["accent"],
+            COLORS["accent_soft"],
         )
         self._quick_button(
             buttons,
             5,
             "统计清零",
             self._reset_statistics,
-            COLORS["red"],
+            COLORS["danger"],
             icon="↻",
-            hover_color=COLORS["red_soft"],
+            hover_color=COLORS["danger_soft"],
         )
         self._quick_button(
             buttons,
@@ -1890,18 +1911,18 @@ class MouseGestureApp:
                 "mouse_pointer_size",
                 self.actions.open_mouse_pointer_size_settings,
             ),
-            COLORS["green"],
+            COLORS["success"],
             icon=MOUSE_POINTER_SIZE_ICON,
-            hover_color=COLORS["green_soft"],
+            hover_color=COLORS["success_soft"],
         )
         button = self._quick_button(
             buttons,
             7,
             "",
             self._run_custom_action,
-            COLORS["blue"],
+            COLORS["accent"],
             textvariable=self.custom_quick_label_var,
-            hover_color=COLORS["blue_soft"],
+            hover_color=COLORS["accent_soft"],
         )
         button.bind(
             "<Button-3>",
@@ -1921,10 +1942,13 @@ class MouseGestureApp:
         self.ai_tool_entry = tk.Entry(
             ai_row,
             textvariable=self.ai_tool_var,
-            bg=COLORS["page"],
+            bg=COLORS["field"],
             fg=COLORS["text"],
             insertbackground=COLORS["text"],
             relief="flat",
+            highlightbackground=COLORS["field_line"],
+            highlightcolor=COLORS["accent"],
+            highlightthickness=1,
             font=("Microsoft YaHei UI", 9),
         )
         self.ai_tool_entry.pack(
@@ -1949,10 +1973,10 @@ class MouseGestureApp:
             ai_row,
             text="保存",
             command=self._save_ai_tool_target,
-            bg=COLORS["blue"],
-            fg="#FFFFFF",
-            activebackground=COLORS["blue_soft"],
-            activeforeground="#FFFFFF",
+            bg=COLORS["accent"],
+            fg=COLORS["on_accent"],
+            activebackground=COLORS["accent_soft"],
+            activeforeground=COLORS["on_accent"],
             relief="flat",
             bd=0,
             cursor="hand2",
@@ -1971,7 +1995,7 @@ class MouseGestureApp:
         textvariable: tk.StringVar | None = None,
         *,
         icon: str = "",
-        hover_color: str = COLORS["blue_soft"],
+        hover_color: str = COLORS["accent_soft"],
     ) -> tk.Button:
         button = tk.Button(
             parent,
@@ -1980,7 +2004,7 @@ class MouseGestureApp:
             command=command,
             bg=COLORS["page"],
             fg=COLORS["text"],
-            activebackground=COLORS["blue_soft"],
+            activebackground=COLORS["accent_soft"],
             activeforeground=accent,
             highlightbackground=COLORS["line"],
             highlightthickness=1,
@@ -2100,7 +2124,7 @@ class MouseGestureApp:
         self._new_encouragement()
         bar = tk.Frame(
             page,
-            bg=COLORS["green_soft"],
+            bg=COLORS["success_soft"],
             padx=13,
             pady=7,
         )
@@ -2108,14 +2132,14 @@ class MouseGestureApp:
         tk.Label(
             bar,
             text="今日鼓励",
-            bg=COLORS["green_soft"],
-            fg=COLORS["green"],
+            bg=COLORS["success_soft"],
+            fg=COLORS["success"],
             font=("Microsoft YaHei UI", 9, "bold"),
         ).pack(side="left")
         tk.Label(
             bar,
             textvariable=self.encouragement_var,
-            bg=COLORS["green_soft"],
+            bg=COLORS["success_soft"],
             fg=COLORS["text"],
             font=("Microsoft YaHei UI", 9),
             justify="left",
@@ -2125,8 +2149,8 @@ class MouseGestureApp:
             bar,
             text="换一句",
             command=self._new_encouragement,
-            bg=COLORS["green_soft"],
-            fg=COLORS["green"],
+            bg=COLORS["success_soft"],
+            fg=COLORS["success"],
             activebackground=COLORS["card"],
             relief="flat",
             bd=0,
@@ -2137,7 +2161,7 @@ class MouseGestureApp:
     def _start_hook(self) -> None:
         if not self.hook.start():
             self.status_var.set("监听启动失败")
-            self._set_status_dot(COLORS["red"])
+            self._set_status_dot(COLORS["danger"])
             self.toggle_button.configure(text="重试启动监听")
             messagebox.showerror(
                 "启动失败",
@@ -2174,35 +2198,35 @@ class MouseGestureApp:
     def _refresh_listening_state(self) -> None:
         if self.active_page == "mouse_test":
             self.status_var.set("按键测试中")
-            self._set_status_dot(COLORS["blue"])
+            self._set_status_dot(COLORS["accent"])
             self._sync_radial_status("按键测试中", RADIAL_COLORS["hover"])
             self.toggle_button.configure(
                 text="测试期间暂停组合",
                 bg=COLORS["nav_soft"],
                 activebackground=COLORS["nav_soft"],
                 state="disabled",
-                disabledforeground="#FFFFFF",
+                disabledforeground=COLORS["on_accent"],
             )
             return
 
         self.toggle_button.configure(state="normal")
         if self.listening:
             self.status_var.set("正在监听")
-            self._set_status_dot(COLORS["green"])
+            self._set_status_dot(COLORS["success"])
             self._sync_radial_status("已开启 · 正在监听", RADIAL_COLORS["status_green"])
             self.toggle_button.configure(
                 text="暂停组合监听",
-                bg=COLORS["blue"],
-                activebackground="#405ED9",
+                bg=COLORS["accent"],
+                activebackground=COLORS["accent_active"],
             )
         else:
             self.status_var.set("监听已暂停")
-            self._set_status_dot(COLORS["orange"])
+            self._set_status_dot(COLORS["warning"])
             self._sync_radial_status("监听已暂停", RADIAL_COLORS["status_orange"])
             self.toggle_button.configure(
                 text="开始组合监听",
-                bg=COLORS["orange"],
-                activebackground="#C9761E",
+                bg=COLORS["warning"],
+                activebackground=COLORS["warning_active"],
             )
 
     def _sync_radial_status(self, text: str, color: str) -> None:
@@ -2240,7 +2264,7 @@ class MouseGestureApp:
         for variable in self.usage_vars.values():
             variable.set("0")
         self._append_log("本次运行统计已清零", "muted")
-        self._show_toast("统计已清零", COLORS["blue"])
+        self._show_toast("统计已清零", COLORS["accent"])
 
     def _run_quick_action(
         self,
@@ -2306,7 +2330,7 @@ class MouseGestureApp:
             _quick_tool_label(CUSTOM_TOOL_ICON, name)
         )
         self._append_log(f"已更新自定义按钮：{name}", "success")
-        self._show_toast("自定义按钮已保存", COLORS["green"])
+        self._show_toast("自定义按钮已保存", COLORS["success"])
 
     def _browse_ai_tool(self) -> None:
         path = filedialog.askopenfilename(
@@ -2331,10 +2355,10 @@ class MouseGestureApp:
             return
         if target:
             self._append_log(f"已保存 AI 工具：{target}", "success")
-            self._show_toast("AI 工具已保存", COLORS["green"])
+            self._show_toast("AI 工具已保存", COLORS["success"])
         else:
             self._append_log("已清空 AI 工具配置", "info")
-            self._show_toast("AI 工具已清空", COLORS["blue"])
+            self._show_toast("AI 工具已清空", COLORS["accent"])
 
     def _display_quick_result(
         self,
@@ -2350,7 +2374,7 @@ class MouseGestureApp:
         self._append_log(text, event_type)
         self._show_toast(
             result.message,
-            COLORS["green"] if result.success else COLORS["red"],
+            COLORS["success"] if result.success else COLORS["danger"],
         )
 
     def _new_encouragement(self) -> None:
@@ -2489,9 +2513,9 @@ class MouseGestureApp:
             return
         self.keyboard_mapping_buttons[index].configure(
             text="停用" if mapping.enabled else "启动",
-            bg=COLORS["green"] if mapping.enabled else COLORS["blue"],
+            bg=COLORS["success"] if mapping.enabled else COLORS["accent"],
             activebackground=(
-                "#18865E" if mapping.enabled else "#405ED9"
+                COLORS["success_active"] if mapping.enabled else COLORS["accent_active"]
             ),
         )
         paste_button = self.keyboard_mapping_paste_buttons[index]
@@ -2503,13 +2527,13 @@ class MouseGestureApp:
                 text=(
                     "增强粘贴：已开启" if paste_active else "增强粘贴：已关闭"
                 ),
-                bg=COLORS["green"] if paste_active else "#D8DDE6",
-                fg="#FFFFFF" if paste_active else "#5B6472",
+                bg=COLORS["success"] if paste_active else COLORS["disabled"],
+                fg=COLORS["on_accent"] if paste_active else COLORS["disabled_text"],
                 activebackground=(
-                    "#18865E" if paste_active else "#C2C8D3"
+                    COLORS["success_active"] if paste_active else COLORS["diagram_strong"]
                 ),
                 activeforeground=(
-                    "#FFFFFF" if paste_active else "#3F4754"
+                    COLORS["on_accent"] if paste_active else COLORS["text"]
                 ),
             )
 
@@ -2602,19 +2626,19 @@ class MouseGestureApp:
         )
         self._show_toast(
             f"键盘映射{state_text}",
-            COLORS["green"] if enabling else COLORS["orange"],
+            COLORS["success"] if enabling else COLORS["warning"],
         )
 
     def save_settings(self) -> None:
-        self.settings = AppSettings(
+        # 用 dataclasses.replace 而不是重新构造 AppSettings：以前这里是把字段
+        # 一个个列出来重造的，AppSettings 每加一个属性就会被悄悄重置回默认值
+        # ——「保存设置」会把轮盘风格/明暗、剪贴板开关和 AI 工具路径一起清掉。
+        self.settings = dataclasses.replace(
+            self.settings,
             launch_listening=self.launch_var.get(),
             minimize_on_start=self.minimize_var.get(),
             show_radial_menu_on_start=self.radial_menu_var.get(),
-            screenshot_side_buttons=self.settings.screenshot_side_buttons,
-            custom_button_name=self.settings.custom_button_name,
-            custom_button_target=self.settings.custom_button_target,
             keyboard_mappings=self._collect_keyboard_mappings(),
-            radial_menu_items=self.settings.radial_menu_items,
         )
         try:
             self.settings.save()
@@ -2624,7 +2648,7 @@ class MouseGestureApp:
 
         self._apply_keyboard_mappings_to_hook()
         self._append_log("设置已保存并立即生效", "success")
-        self._show_toast("设置已保存", COLORS["green"])
+        self._show_toast("设置已保存", COLORS["success"])
 
     def _on_hook_action(
         self,
@@ -2724,7 +2748,7 @@ class MouseGestureApp:
         indicator = self.mouse_test_status_labels.get(control)
         if indicator is not None:
             indicator.configure(
-                fg=COLORS["green"] if pressed else COLORS["line"]
+                fg=COLORS["success"] if pressed else COLORS["line"]
             )
 
     def _clear_mouse_test_pressed(self) -> None:
@@ -2817,7 +2841,7 @@ class MouseGestureApp:
             if control in self.detected_side_buttons
         )
         self._append_log(f"侧键截图配置已保存：{names}", "success")
-        self._show_toast("侧键截图配置已保存", COLORS["green"])
+        self._show_toast("侧键截图配置已保存", COLORS["success"])
 
     def _execute_held_action(
         self,
@@ -2888,9 +2912,9 @@ class MouseGestureApp:
         self._append_log(text, event_type)
         self._show_toast(
             action_result.message,
-            COLORS["green"]
+            COLORS["success"]
             if action_result.success
-            else COLORS["red"],
+            else COLORS["danger"],
         )
 
     def _display_held_action(
@@ -2912,9 +2936,9 @@ class MouseGestureApp:
 
         self._append_log(text, event_type)
         accent = {
-            "success": COLORS["green"],
-            "warning": COLORS["orange"],
-            "error": COLORS["red"],
+            "success": COLORS["success"],
+            "warning": COLORS["warning"],
+            "error": COLORS["danger"],
         }.get(event_type, COLORS["muted"])
         self._show_toast(action_result.message, accent)
 
@@ -2951,7 +2975,7 @@ class MouseGestureApp:
             body,
             text=text,
             bg=COLORS["nav"],
-            fg="#FFFFFF",
+            fg=COLORS["on_accent"],
             font=("Microsoft YaHei UI", 10, "bold"),
         ).pack()
         toast.update_idletasks()
@@ -3059,7 +3083,7 @@ class MouseGestureApp:
         self._append_log(text, event_type)
         self._show_toast(
             f"{item.label}：{result.message}",
-            COLORS["green"] if result.success else COLORS["red"],
+            COLORS["success"] if result.success else COLORS["danger"],
         )
 
     def _request_close(self) -> None:
@@ -3106,10 +3130,10 @@ class MouseGestureApp:
             command=lambda: self._finish_close_request(
                 CLOSE_CHOICE_CONFIRM
             ),
-            bg=COLORS["red"],
-            fg="#FFFFFF",
-            activebackground="#C93D51",
-            activeforeground="#FFFFFF",
+            bg=COLORS["danger"],
+            fg=COLORS["on_accent"],
+            activebackground=COLORS["danger_active"],
+            activeforeground=COLORS["on_accent"],
             relief="flat",
             bd=0,
             cursor="hand2",
@@ -3123,10 +3147,10 @@ class MouseGestureApp:
             command=lambda: self._finish_close_request(
                 CLOSE_CHOICE_MINIMIZE
             ),
-            bg=COLORS["blue_soft"],
-            fg=COLORS["blue"],
-            activebackground="#DDE3FF",
-            activeforeground=COLORS["blue"],
+            bg=COLORS["accent_soft"],
+            fg=COLORS["accent"],
+            activebackground=COLORS["accent_soft"],
+            activeforeground=COLORS["accent"],
             relief="flat",
             bd=0,
             cursor="hand2",
@@ -3140,10 +3164,10 @@ class MouseGestureApp:
             command=lambda: self._finish_close_request(
                 CLOSE_CHOICE_CANCEL
             ),
-            bg=COLORS["blue"],
-            fg="#FFFFFF",
-            activebackground="#405ED9",
-            activeforeground="#FFFFFF",
+            bg=COLORS["accent"],
+            fg=COLORS["on_accent"],
+            activebackground=COLORS["accent_active"],
+            activeforeground=COLORS["on_accent"],
             relief="flat",
             bd=0,
             cursor="hand2",

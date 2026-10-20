@@ -198,5 +198,30 @@ class EnhancedPasteTests(unittest.TestCase):
         co_uninitialize.assert_called_once_with()
 
 
+class BrowserLaunchTests(unittest.TestCase):
+    """浏览器磁贴只用 ShellExecute，不牵连 webbrowser / subprocess。"""
+
+    def setUp(self) -> None:
+        self.actions = SystemActions.__new__(SystemActions)
+
+    @patch("actions.os.startfile")
+    def test_launches_default_browser_with_blank_page(
+        self, startfile: Mock
+    ) -> None:
+        result = self.actions.open_browser()
+
+        self.assertTrue(result.success)
+        self.assertEqual(result.message, "已启动浏览器")
+        startfile.assert_called_once_with("about:blank")
+
+    @patch("actions.os.startfile", side_effect=OSError("未找到关联程序"))
+    def test_reports_launch_failure(self, _startfile: Mock) -> None:
+        result = self.actions.open_browser()
+
+        self.assertFalse(result.success)
+        self.assertEqual(result.message, "浏览器启动失败")
+        self.assertIn("未找到关联程序", result.detail)
+
+
 if __name__ == "__main__":
     unittest.main()
